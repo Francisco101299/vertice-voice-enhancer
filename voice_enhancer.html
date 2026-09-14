@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>VÉRTICE — Consola de Voz</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --chassis:#121214; --panel:#1d1d20; --panel-raised:#26262a;
+    --hairline:#333338; --screw:#3d3d42;
+    --ink:#e9e6df; --ink-dim:#8b887f;
+    --amber:#ffb020; --amber-dim:#5c4419;
+    --teal:#2dd4bf; --teal-dim:#153e39;
+    --danger:#e2493d;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; min-height:100vh; font-family:'IBM Plex Mono',monospace;
+    background:
+      radial-gradient(ellipse at top, #1a1a1d 0%, var(--chassis) 60%);
+    color:var(--ink); display:flex; justify-content:center;
+    padding:22px 12px 50px;
+  }
+  .console{width:100%; max-width:460px;}
+
+  /* ---- Header / brand plate ---- */
+  .brand{
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding:0 4px 16px; border-bottom:1px solid var(--hairline); margin-bottom:18px;
+  }
+  .brand h1{
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.3rem;
+    letter-spacing:.02em; margin:0; color:var(--ink);
+  }
+  .brand h1 span{color:var(--amber);}
+  .brand .model{font-size:.68rem; color:var(--ink-dim);}
+
+  /* ---- Panel (rack unit) ---- */
+  .panel{
+    position:relative; background:var(--panel); border-radius:10px;
+    padding:20px 18px; margin-bottom:14px;
+    border:1px solid var(--hairline);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.4);
+  }
+  .panel::before, .panel::after{
+    content:""; position:absolute; top:9px; width:5px; height:5px; border-radius:50%;
+    background:var(--screw); box-shadow: inset 0 1px 1px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.05);
+  }
+  .panel::before{left:9px;} .panel::after{right:9px;}
+  .panel-label{
+    font-size:.66rem; letter-spacing:.08em; color:var(--ink-dim);
+    margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;
+  }
+  .panel-label .tag{color:var(--ink-dim); font-weight:500;}
+
+  /* ---- Tuner display ---- */
+  .display{
+    background:#0b0b0c; border-radius:6px; padding:18px 14px;
+    border:1px solid var(--hairline); box-shadow: inset 0 2px 8px rgba(0,0,0,.6);
+    text-align:center; margin-bottom:8px;
+  }
+  .note{
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:2.4rem;
+    color:var(--teal); letter-spacing:.03em; min-height:2.8rem; line-height:1;
+    text-shadow:0 0 18px rgba(45,212,191,.35);
+  }
+  .note.idle{color:#3a3a3e; text-shadow:none;}
+  .display .readout-label{font-size:.62rem; color:var(--ink-dim); letter-spacing:.1em; margin-top:6px;}
+
+  .meter-wrap{height:7px; background:#0b0b0c; border-radius:4px; overflow:hidden; margin-top:14px; border:1px solid var(--hairline);}
+  #meter{height:100%; width:0%; background:linear-gradient(90deg,var(--teal),var(--amber)); transition:width .06s;}
+
+  /* ---- Transport button ---- */
+  .transport{
+    width:100%; padding:15px; border:1px solid var(--hairline); border-radius:8px;
+    background:var(--panel-raised); color:var(--ink); font-family:'IBM Plex Mono',monospace;
+    font-weight:600; font-size:.9rem; letter-spacing:.03em; cursor:pointer; margin-top:14px;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    transition:background .15s, color .15s, border-color .15s;
+  }
+  .transport .dot{width:8px; height:8px; border-radius:50%; background:var(--ink-dim);}
+  .transport:active{transform:translateY(1px);}
+  .transport.live{background:var(--teal-dim); border-color:var(--teal); color:var(--teal);}
+  .transport.live .dot{background:var(--teal); box-shadow:0 0 8px var(--teal);}
+
+  .status-line{font-size:.68rem; color:var(--ink-dim); text-align:center; margin-top:10px;}
+
+  /* ---- Channel rows (controls) ---- */
+  .channel{
+    display:grid; grid-template-columns:1fr auto; align-items:center;
+    gap:10px 14px; padding:11px 0; border-bottom:1px solid var(--hairline);
+  }
+  .channel:last-child{border-bottom:none;}
+  .channel .cname{font-size:.78rem; color:var(--ink);}
+  .channel .csub{font-size:.62rem; color:var(--ink-dim); display:block; margin-top:2px;}
+  .channel .cval{
+    font-size:.72rem; color:var(--amber); text-align:right; min-width:42px; font-weight:600;
+  }
+  .channel.full{grid-template-columns:1fr;}
+  .channel select{
+    grid-column:1/-1; background:#0f0f11; color:var(--ink); border:1px solid var(--hairline);
+    border-radius:6px; padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:.78rem;
+  }
+  .channel input[type=range]{
+    grid-column:1/-1; -webkit-appearance:none; appearance:none; width:100%;
+    height:3px; background:var(--hairline); border-radius:2px; outline:none;
+  }
+  .channel input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:var(--amber); border:2px solid #0b0b0c; cursor:pointer;
+    box-shadow:0 0 0 1px var(--hairline);
+  }
+  .channel .row-top{display:flex; justify-content:space-between; align-items:center; grid-column:1/-1;}
+
+  /* ---- Toggle switch (console-style rocker) ---- */
+  .rocker{position:relative; width:42px; height:22px; flex-shrink:0;}
+  .rocker input{opacity:0; width:0; height:0;}
+  .rocker-track{
+    position:absolute; inset:0; background:#0f0f11; border:1px solid var(--hairline);
+    border-radius:11px; transition:.2s; cursor:pointer;
+  }
+  .rocker-track:before{
+    content:""; position:absolute; height:14px; width:14px; left:3px; top:3px;
+    background:var(--ink-dim); border-radius:50%; transition:.2s;
+  }
+  .rocker input:checked + .rocker-track{border-color:var(--teal);}
+  .rocker input:checked + .rocker-track:before{transform:translateX(20px); background:var(--teal); box-shadow:0 0 6px var(--teal);}
+
+  /* ---- Record panel ---- */
+  .rec-btn{
+    width:100%; padding:14px; border:1px solid var(--hairline); border-radius:8px;
+    background:var(--panel-raised); color:var(--ink); font-family:'IBM Plex Mono',monospace;
+    font-weight:600; font-size:.85rem; cursor:pointer; display:flex; align-items:center;
+    justify-content:center; gap:9px;
+  }
+  .rec-btn .rdot{width:9px; height:9px; border-radius:50%; background:var(--danger);}
+  .rec-btn.active{background:#3a1613; border-color:var(--danger); color:var(--danger);}
+  .rec-btn.active .rdot{animation:blink 1s infinite;}
+  @keyframes blink{50%{opacity:.2;}}
+  #dlLink{
+    display:none; text-align:center; padding:12px; border-radius:8px; margin-top:10px;
+    background:var(--teal-dim); color:var(--teal); text-decoration:none; font-weight:600; font-size:.82rem;
+    border:1px solid var(--teal);
+  }
+
+  footer{text-align:center; font-size:.64rem; color:var(--ink-dim); margin-top:16px; letter-spacing:.03em;}
+</style>
+</head>
+<body>
+<div class="console">
+
+  <div class="brand">
+    <h1>VÉR<span>TICE</span></h1>
+    <div class="model">MOD. VC-1 · PROCESADOR VOCAL</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label"><span>AFINADOR</span><span class="tag">ENTRADA EN VIVO</span></div>
+    <div class="display">
+      <div class="note idle" id="noteDisplay">—</div>
+      <div class="readout-label">NOTA DETECTADA</div>
+      <div class="meter-wrap"><div id="meter"></div></div>
+    </div>
+    <button id="startBtn" class="transport"><span class="dot"></span><span id="startBtnText">ACTIVAR MICRÓFONO</span></button>
+    <div class="status-line" id="status">Esperando permiso de micrófono…</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label"><span>AUTOTUNE</span><span class="tag">CH.1</span></div>
+
+    <div class="channel">
+      <div><span class="cname">Corrección de tono</span><span class="csub">Activa/desactiva el efecto</span></div>
+      <label class="rocker"><input type="checkbox" id="autotuneToggle" checked><span class="rocker-track"></span></label>
+    </div>
+
+    <div class="channel full">
+      <select id="scaleSelect">
+        <option value="chromatic">Escala cromática (todas las notas)</option>
+        <option value="major">Escala mayor</option>
+        <option value="minor">Escala menor natural</option>
+      </select>
+    </div>
+
+    <div class="channel full">
+      <select id="rootSelect">
+        <option value="0">Tónica: C</option><option value="1">Tónica: C#</option><option value="2">Tónica: D</option>
+        <option value="3">Tónica: D#</option><option value="4">Tónica: E</option><option value="5">Tónica: F</option>
+        <option value="6">Tónica: F#</option><option value="7">Tónica: G</option><option value="8">Tónica: G#</option>
+        <option value="9">Tónica: A</option><option value="10">Tónica: A#</option><option value="11">Tónica: B</option>
+      </select>
+    </div>
+
+    <div class="channel full">
+      <div class="row-top"><span class="cname">Velocidad de corrección</span><span class="cval" id="speedVal">70%</span></div>
+      <input type="range" id="speedRange" min="1" max="100" value="70">
+    </div>
+
+    <div class="channel full">
+      <div class="row-top"><span class="cname">Efecto extremo <span class="csub" style="display:inline">(coro/vibrato)</span></span><span class="cval" id="crazyVal">0%</span></div>
+      <input type="range" id="crazyRange" min="0" max="100" value="0">
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label"><span>LIMPIEZA DE SEÑAL</span><span class="tag">CH.2</span></div>
+
+    <div class="channel">
+      <div><span class="cname">Reducción de ruido</span><span class="csub">Gate + filtro de graves</span></div>
+      <label class="rocker"><input type="checkbox" id="noiseToggle" checked><span class="rocker-track"></span></label>
+    </div>
+
+    <div class="channel full">
+      <div class="row-top"><span class="cname">Sensibilidad del gate</span><span class="cval" id="gateVal">35%</span></div>
+      <input type="range" id="gateRange" min="0" max="100" value="35">
+    </div>
+
+    <div class="channel full">
+      <div class="row-top"><span class="cname">Filtro de graves (rumble)</span><span class="cval" id="hpVal">40%</span></div>
+      <input type="range" id="hpRange" min="0" max="100" value="40">
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label"><span>SALIDA</span><span class="tag">MASTER</span></div>
+    <button id="recBtn" class="rec-btn"><span class="rdot"></span><span id="recBtnText">GRABAR SALIDA PROCESADA</span></button>
+    <a id="dlLink" href="#" download="voz_mejorada.webm">↓ DESCARGAR GRABACIÓN</a>
+  </div>
+
+  <footer>USA AUDÍFONOS PARA EVITAR RETROALIMENTACIÓN</footer>
+</div>
+
+<script>
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const SCALE_STEPS = {
+  chromatic: [0,1,2,3,4,5,6,7,8,9,10,11],
+  major:     [0,2,4,5,7,9,11],
+  minor:     [0,2,3,5,7,8,10]
+};
+
+let audioCtx, mic, sourceNode;
+let hpFilter, gateGain, analyser;
+let pitchShift, crazyChorus, outGain;
+let running = false;
+let mediaRecorder, recordedChunks = [];
+let rafId;
+
+const startBtn = document.getElementById('startBtn');
+const startBtnText = document.getElementById('startBtnText');
+const statusEl = document.getElementById('status');
+const meterEl = document.getElementById('meter');
+const noteDisplay = document.getElementById('noteDisplay');
+const recBtn = document.getElementById('recBtn');
+const recBtnText = document.getElementById('recBtnText');
+const dlLink = document.getElementById('dlLink');
+
+const autotuneToggle = document.getElementById('autotuneToggle');
+const noiseToggle = document.getElementById('noiseToggle');
+const scaleSelect = document.getElementById('scaleSelect');
+const rootSelect = document.getElementById('rootSelect');
+const speedRange = document.getElementById('speedRange');
+const crazyRange = document.getElementById('crazyRange');
+const gateRange = document.getElementById('gateRange');
+const hpRange = document.getElementById('hpRange');
+const speedVal = document.getElementById('speedVal');
+const crazyVal = document.getElementById('crazyVal');
+const gateVal = document.getElementById('gateVal');
+const hpVal = document.getElementById('hpVal');
+
+[[speedRange,speedVal,'%'],[crazyRange,crazyVal,'%'],[gateRange,gateVal,'%'],[hpRange,hpVal,'%']]
+  .forEach(([r,v,suf])=>{ r.addEventListener('input',()=>{ v.textContent=r.value+suf; updateParams(); }); });
+[autotuneToggle,noiseToggle,scaleSelect,rootSelect].forEach(el=>el.addEventListener('change',updateParams));
+
+function freqToMidi(freq){ return 69 + 12*Math.log2(freq/440); }
+function midiToFreq(midi){ return 440*Math.pow(2,(midi-69)/12); }
+
+function nearestScaleMidi(midi, rootPc, steps){
+  const midiRound = Math.round(midi);
+  const pc = ((midiRound % 12) + 12) % 12;
+  let best = null, bestDist = 99;
+  for(let oct=-1; oct<=1; oct++){
+    for(const s of steps){
+      const cand = midiRound + oct*12;
+      const candPc = ((cand % 12)+12)%12;
+      const targetPc = (rootPc + s) % 12;
+      if(candPc === targetPc){
+        const dist = Math.abs(cand - midiRound);
+        if(dist < bestDist){ bestDist = dist; best = cand; }
+      }
+    }
+  }
+  return best === null ? midiRound : best;
+}
+
+// Simple autocorrelation pitch detector
+function autoCorrelate(buf, sampleRate){
+  const SIZE = buf.length;
+  let rms = 0;
+  for(let i=0;i<SIZE;i++){ rms += buf[i]*buf[i]; }
+  rms = Math.sqrt(rms/SIZE);
+  if(rms < 0.01) return {freq:-1, rms};
+
+  let r1=0, r2=SIZE-1, thres=0.2;
+  for(let i=0;i<SIZE/2;i++){ if(Math.abs(buf[i])<thres){ r1=i; break; } }
+  for(let i=1;i<SIZE/2;i++){ if(Math.abs(buf[SIZE-i])<thres){ r2=SIZE-i; break; } }
+  const trimmed = buf.slice(r1,r2);
+  const newSize = trimmed.length;
+  const c = new Array(newSize).fill(0);
+  for(let lag=0; lag<newSize; lag++){
+    for(let i=0; i<newSize-lag; i++){ c[lag] += trimmed[i]*trimmed[i+lag]; }
+  }
+  let d=0; while(c[d] > c[d+1]) d++;
+  let maxval=-1, maxpos=-1;
+  for(let i=d;i<newSize;i++){ if(c[i]>maxval){ maxval=c[i]; maxpos=i; } }
+  let T0 = maxpos;
+  const x1=c[T0-1]||0, x2=c[T0]||0, x3=c[T0+1]||0;
+  const a=(x1+x3-2*x2)/2, b=(x3-x1)/2;
+  if(a) T0 = T0 - b/(2*a);
+  if(T0<=0) return {freq:-1, rms};
+  return {freq: sampleRate/T0, rms};
+}
+
+async function start(){
+  if(running){ stop(); return; }
+  try{
+    await Tone.start();
+    audioCtx = Tone.getContext().rawContext;
+    const stream = await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:true, noiseSuppression:false, autoGainControl:false
+    }});
+    mic = stream;
+    sourceNode = audioCtx.createMediaStreamSource(stream);
+
+    hpFilter = audioCtx.createBiquadFilter();
+    hpFilter.type = 'highpass';
+    hpFilter.frequency.value = 80;
+
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+
+    gateGain = audioCtx.createGain();
+    gateGain.gain.value = 1;
+
+    // Tone.js nodes for pitch shift + a "crazy" chorus/vibrato layer
+    pitchShift = new Tone.PitchShift({ pitch:0, windowSize:0.06, delayTime:0 });
+    crazyChorus = new Tone.Chorus({ frequency: 2, delayTime: 3.5, depth: 0, wet: 0 }).start();
+    outGain = new Tone.Gain(1);
+
+    const gateNode = Tone.context.createGain ? null : null;
+    const toneSrc = Tone.getContext().createMediaStreamSource ? null : null;
+
+    // Wire native graph -> analyser (for pitch detect) and -> gate -> Tone graph
+    sourceNode.connect(hpFilter);
+    hpFilter.connect(analyser);
+    hpFilter.connect(gateGain);
+
+    const gateOutTone = Tone.getContext().createGain();
+    gateGain.connect(gateOutTone);
+    const toneWrapped = Tone.getContext().createGain();
+    gateOutTone.connect(toneWrapped);
+
+    const tonePitchInput = new Tone.Gain(1);
+    Tone.connect(toneWrapped, tonePitchInput);
+    tonePitchInput.connect(pitchShift);
+    pitchShift.connect(crazyChorus);
+    crazyChorus.connect(outGain);
+    outGain.toDestination();
+
+    // recorder tap
+    window.__recDest = Tone.getContext().createMediaStreamDestination();
+    outGain.connect(window.__recDest);
+
+    running = true;
+    startBtnText.textContent = 'DETENER MICRÓFONO';
+    startBtn.classList.add('live');
+    statusEl.textContent = 'Escuchando — habla o canta';
+    updateParams();
+    loopPitch();
+  }catch(err){
+    statusEl.textContent = 'No se pudo acceder al micrófono: ' + err.message;
+  }
+}
+
+function stop(){
+  running = false;
+  cancelAnimationFrame(rafId);
+  if(mic){ mic.getTracks().forEach(t=>t.stop()); }
+  startBtnText.textContent = 'ACTIVAR MICRÓFONO';
+  startBtn.classList.remove('live');
+  statusEl.textContent = 'Micrófono detenido.';
+  meterEl.style.width = '0%';
+  noteDisplay.textContent = '—';
+  noteDisplay.classList.add('idle');
+}
+
+function updateParams(){
+  if(!hpFilter) return;
+  const hpAmount = parseInt(hpRange.value,10);
+  hpFilter.frequency.value = 40 + hpAmount*3;
+
+  const crazy = parseInt(crazyRange.value,10)/100;
+  if(crazyChorus){
+    crazyChorus.depth = crazy;
+    crazyChorus.wet.value = crazy*0.8;
+    crazyChorus.frequency.value = 1 + crazy*6;
+  }
+}
+
+function loopPitch(){
+  if(!running) return;
+  const buf = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(buf);
+  const {freq, rms} = autoCorrelate(buf, audioCtx.sampleRate);
+
+  meterEl.style.width = Math.min(100, rms*400) + '%';
+
+  const gateThresh = parseInt(gateRange.value,10)/1000; // 0 - 0.1
+  if(noiseToggle.checked){
+    const targetGain = rms > gateThresh ? 1 : 0;
+    gateGain.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.02);
+  } else {
+    gateGain.gain.setTargetAtTime(1, audioCtx.currentTime, 0.02);
+  }
+
+  if(freq > 60 && freq < 1200 && rms > 0.008){
+    const midi = freqToMidi(freq);
+    const rootPc = parseInt(rootSelect.value,10);
+    const steps = SCALE_STEPS[scaleSelect.value];
+    const targetMidi = nearestScaleMidi(midi, rootPc, steps);
+    const pc = ((targetMidi%12)+12)%12;
+    const octave = Math.floor(targetMidi/12) - 1;
+    noteDisplay.textContent = NOTE_NAMES[pc] + octave;
+    noteDisplay.classList.remove('idle');
+
+    if(autotuneToggle.checked){
+      const semitoneDiff = targetMidi - midi;
+      const speed = parseInt(speedRange.value,10)/100;
+      const currentPitch = pitchShift.pitch;
+      const newPitch = currentPitch + (semitoneDiff - currentPitch)*Math.min(1,speed*0.9+0.1);
+      pitchShift.pitch = Math.max(-12, Math.min(12, newPitch));
+    } else {
+      pitchShift.pitch = 0;
+    }
+  }
+
+  rafId = requestAnimationFrame(loopPitch);
+}
+
+startBtn.addEventListener('click', start);
+
+recBtn.addEventListener('click', ()=>{
+  if(!running){ statusEl.textContent='Activa el micrófono primero.'; return; }
+  if(!recBtn.classList.contains('active')){
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(window.__recDest.stream);
+    mediaRecorder.ondataavailable = e => { if(e.data.size>0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedChunks, {type:'audio/webm'});
+      const url = URL.createObjectURL(blob);
+      dlLink.href = url;
+      dlLink.style.display = 'block';
+    };
+    mediaRecorder.start();
+    recBtnText.textContent = 'DETENER GRABACIÓN';
+    recBtn.classList.add('active');
+    dlLink.style.display = 'none';
+  } else {
+    mediaRecorder.stop();
+    recBtnText.textContent = 'GRABAR SALIDA PROCESADA';
+    recBtn.classList.remove('active');
+  }
+});
+</script>
+</body>
+</html>
