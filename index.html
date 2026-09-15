@@ -155,6 +155,36 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <video id="outputVideo" controls class="hidden"></video>
                 <button class="btn btn-secondary hidden" id="downloadVideoBtn" onclick="downloadProcessedVideo()">⬇ DESCARGAR VIDEO PROCESADO</button>
             </div>
+            <div class="section">
+                <h2>📝 GENERADOR DE SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
+                <div class="control-group">
+                    <label>Idiomas de salida</label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="checkbox" class="subtitleLangCheckbox" value="es" checked style="width:18px;height:18px;"> Español (original)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="checkbox" class="subtitleLangCheckbox" value="en" style="width:18px;height:18px;"> Inglés (traducido)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="checkbox" class="subtitleLangCheckbox" value="fr" style="width:18px;height:18px;"> Francés (traducido)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="checkbox" class="subtitleLangCheckbox" value="pt" style="width:18px;height:18px;"> Portugués (traducido)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="checkbox" class="subtitleLangCheckbox" value="it" style="width:18px;height:18px;"> Italiano (traducido)
+                    </label>
+                </div>
+                <button class="btn btn-primary" id="generateSubsBtn" onclick="generateSubtitles()" disabled>GENERAR SUBTÍTULOS</button>
+                <div id="subsStatus" class="status hidden"></div>
+                <div class="progress-bar hidden" id="subsProgressBar">
+                    <div class="progress-fill" id="subsProgressFill">0%</div>
+                </div>
+                <div id="subsDownloads" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;"></div>
+                <div class="warning" style="margin-top:9px;">
+                    Usa un modelo de IA (Whisper) que se descarga la primera vez (decenas de MB) y corre 100% en tu dispositivo. La calidad depende del modelo y de la claridad del audio; nombres propios o acentos fuertes pueden generar errores.
+                </div>
+            </div>
         </div>
         <div class="pro-footer"><span>VÉRTICE VC-1</span><span>PRO ENGINE · LOCAL DSP</span><span>BUILD 01</span></div>
     </div>
@@ -359,6 +389,343 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             btn.textContent = rnnoiseEnabled ? 'DESACTIVAR' : 'ACTIVAR';
             btn.classList.toggle('btn-primary', rnnoiseEnabled);
             btn.classList.toggle('btn-secondary', !rnnoiseEnabled);
+        }
+
+        // ==========================================================
+        // GENERADOR DE SUBTÍTULOS (Whisper + OPUS-MT, vía transformers.js)
+        // ==========================================================
+        // Librería real y documentada: @huggingface/transformers (antes
+        // @xenova/transformers). Fijamos la versión 3.8.1 (última "estable"
+        // según la propia documentación oficial al momento de escribir esto;
+        // la v4 es una reescritura reciente del runtime y preferimos no
+        // apostar por ella todavía para algo que debe funcionar sin fallos).
+        //
+        // API verificada (no inventada):
+        //   import { pipeline } from '@huggingface/transformers';
+        //   const asr = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base');
+        //   const out = await asr(audioFloat32Array, {
+        //       chunk_length_s: 30, stride_length_s: 5, return_timestamps: true,
+        //       language: 'spanish', task: 'transcribe' // o 'translate' (SOLO hacia inglés)
+        //   });
+        //   // out.chunks: [{ timestamp: [inicio, fin], text }, ...]
+        //
+        //   const translator = await pipeline('translation', 'Xenova/opus-mt-es-fr');
+        //   const out2 = await translator('texto en español');
+        //   // out2[0].translation_text
+        //
+        // Igual que con FFmpeg y RNNoise: todo corre en un Worker propio
+        // (Blob same-origin) para no congelar la interfaz, y el módulo real
+        // se importa dinámicamente desde jsDelivr DENTRO del Worker.
+        //
+        // LÍMITE HONESTO: no pude probar esto en un navegador real desde este
+        // entorno. Si algo de la carga del modelo falla (red, CORS, cambio de
+        // versión del paquete), el error se captura y se muestra con claridad
+        // en el panel de subtítulos — no debería romper el resto de la app.
+        let subtitleWorkerInstance = null;
+        let subtitleMsgId = 0;
+
+        const SUBTITLE_WORKER_SRC = `
+            let pipelinePromise = null;
+            let whisperPipeline = null;
+            const translationPipelines = {};
+
+            const TRANSLATION_MODELS = {
+                fr: 'Xenova/opus-mt-es-fr',
+                pt: 'Xenova/opus-mt-es-pt',
+                it: 'Xenova/opus-mt-es-it'
+            };
+
+            async function getPipelineFn() {
+                if (!pipelinePromise) {
+                    pipelinePromise = import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm');
+                }
+                const mod = await pipelinePromise;
+                const fn = mod.pipeline || mod.default?.pipeline;
+                if (typeof fn !== 'function') {
+                    throw new Error('El módulo transformers.js no expone pipeline().');
+                }
+                return fn;
+            }
+
+            async function getWhisper(id) {
+                if (whisperPipeline) return whisperPipeline;
+                const pipelineFn = await getPipelineFn();
+                whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-base', {
+                    progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
+                });
+                return whisperPipeline;
+            }
+
+            async function getTranslator(id, lang) {
+                const modelId = TRANSLATION_MODELS[lang];
+                if (!modelId) throw new Error('Idioma no soportado para traducción de texto: ' + lang);
+                if (translationPipelines[lang]) return translationPipelines[lang];
+                const pipelineFn = await getPipelineFn();
+                const t = await pipelineFn('translation', modelId, {
+                    progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
+                });
+                translationPipelines[lang] = t;
+                return t;
+            }
+
+            function normalizeSegments(chunks, totalDuration) {
+                const list = chunks || [];
+                return list.map((c, i) => {
+                    const ts = c.timestamp || [0, null];
+                    let start = ts[0];
+                    let end = ts[1];
+                    if (start == null) start = 0;
+                    if (end == null) {
+                        const next = list[i + 1];
+                        end = (next && next.timestamp && next.timestamp[0] != null)
+                            ? next.timestamp[0]
+                            : (totalDuration || start + 2);
+                    }
+                    return { start, end, text: (c.text || '').trim() };
+                }).filter(s => s.text.length > 0);
+            }
+
+            self.onmessage = async (event) => {
+                const { id, samples, duration, languages } = event.data;
+                try {
+                    const audio = new Float32Array(samples);
+                    const wantEs = languages.includes('es');
+                    const wantEn = languages.includes('en');
+                    const wantOther = languages.filter(l => l !== 'es' && l !== 'en');
+
+                    self.postMessage({ id, type: 'status', message: 'Cargando modelo Whisper (puede tardar la primera vez)…' });
+                    const whisper = await getWhisper(id);
+
+                    const result = {};
+
+                    self.postMessage({ id, type: 'status', message: 'Transcribiendo audio en español…' });
+                    const esOutput = await whisper(audio, {
+                        chunk_length_s: 30,
+                        stride_length_s: 5,
+                        return_timestamps: true,
+                        language: 'spanish',
+                        task: 'transcribe'
+                    });
+                    const esSegments = normalizeSegments(esOutput.chunks, duration);
+                    if (wantEs) result.es = esSegments;
+
+                    if (wantEn) {
+                        self.postMessage({ id, type: 'status', message: 'Traduciendo al inglés con Whisper…' });
+                        const enOutput = await whisper(audio, {
+                            chunk_length_s: 30,
+                            stride_length_s: 5,
+                            return_timestamps: true,
+                            language: 'spanish',
+                            task: 'translate'
+                        });
+                        result.en = normalizeSegments(enOutput.chunks, duration);
+                    }
+
+                    for (const lang of wantOther) {
+                        self.postMessage({ id, type: 'status', message: 'Traduciendo texto (' + lang + ')…' });
+                        const translator = await getTranslator(id, lang);
+                        const translated = [];
+                        for (const seg of esSegments) {
+                            const out = await translator(seg.text, { top_k: 0, do_sample: false, num_beams: 1 });
+                            const text = Array.isArray(out) ? (out[0]?.translation_text || '') : (out.translation_text || '');
+                            translated.push({ start: seg.start, end: seg.end, text: text.trim() });
+                        }
+                        result[lang] = translated;
+                    }
+
+                    self.postMessage({ id, type: 'done', result });
+                } catch (err) {
+                    self.postMessage({ id, type: 'error', message: (err && err.message) || String(err) });
+                }
+            };
+        `;
+
+        function getSubtitleWorker() {
+            if (subtitleWorkerInstance) return subtitleWorkerInstance;
+            const blob = new Blob([SUBTITLE_WORKER_SRC], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            ffmpegRuntimeBlobURLs.push(url);
+            subtitleWorkerInstance = new Worker(url);
+            return subtitleWorkerInstance;
+        }
+
+        function runSubtitleGeneration(monoFloat16k, duration, languages, onStatus) {
+            return new Promise((resolve, reject) => {
+                let worker;
+                try {
+                    worker = getSubtitleWorker();
+                } catch (err) {
+                    reject(err);
+                    return;
+                }
+
+                const id = ++subtitleMsgId;
+                // Margen amplio: descargar Whisper + transcribir + traducir
+                // varios idiomas puede tardar varios minutos en un celular.
+                const timeoutMs = 15 * 60 * 1000;
+                const timeout = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('La generación de subtítulos tardó demasiado (tiempo límite alcanzado).'));
+                }, timeoutMs);
+
+                function handleMessage(e) {
+                    if (!e.data || e.data.id !== id) return;
+                    if (e.data.type === 'status') {
+                        if (onStatus) onStatus(e.data.message);
+                    } else if (e.data.type === 'model-progress') {
+                        const p = e.data.info;
+                        if (p && typeof p.progress === 'number' && onStatus) {
+                            onStatus('Descargando modelo… ' + Math.round(p.progress) + '%');
+                        }
+                    } else if (e.data.type === 'done') {
+                        clearTimeout(timeout);
+                        cleanup();
+                        resolve(e.data.result);
+                    } else if (e.data.type === 'error') {
+                        clearTimeout(timeout);
+                        cleanup();
+                        reject(new Error(e.data.message || 'Error desconocido generando subtítulos.'));
+                    }
+                }
+                function handleWorkerError(e) {
+                    clearTimeout(timeout);
+                    cleanup();
+                    reject(new Error('El Worker de subtítulos falló: ' + (e?.message || 'error desconocido')));
+                }
+                function cleanup() {
+                    worker.removeEventListener('message', handleMessage);
+                    worker.removeEventListener('error', handleWorkerError);
+                }
+                worker.addEventListener('message', handleMessage);
+                worker.addEventListener('error', handleWorkerError);
+
+                const copy = monoFloat16k.slice();
+                worker.postMessage({ id, samples: copy.buffer, duration, languages }, [copy.buffer]);
+            });
+        }
+
+        function formatSrtTime(seconds) {
+            if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            const ms = Math.round((seconds - Math.floor(seconds)) * 1000);
+            const pad = (n, len) => String(n).padStart(len, '0');
+            return pad(h, 2) + ':' + pad(m, 2) + ':' + pad(s, 2) + ',' + pad(ms, 3);
+        }
+
+        function segmentsToSrt(segments) {
+            return segments.map((seg, i) =>
+                (i + 1) + '\n' + formatSrtTime(seg.start) + ' --> ' + formatSrtTime(seg.end) + '\n' + seg.text + '\n'
+            ).join('\n');
+        }
+
+        function setSubsStatus(title, detail, percent = null) {
+            const status = document.getElementById('subsStatus');
+            if (!status) return;
+            if (percent === 0 && title.startsWith('ERROR')) {
+                status.className = 'status error';
+                status.innerHTML = '❌ <strong>' + escapeHtml(title) + '</strong><br>' + escapeHtml(detail);
+            } else {
+                status.className = 'status processing';
+                const p = percent == null ? '' : ` · ${Math.round(percent)}%`;
+                status.innerHTML =
+                    '<span class="process-status-line"><span class="spinner"></span><strong>' +
+                    escapeHtml(title) + '</strong>' + p + '</span><br><small>' +
+                    escapeHtml(detail) + '</small>';
+            }
+            status.classList.remove('hidden');
+            if (percent != null) {
+                const bar = document.getElementById('subsProgressBar');
+                const fill = document.getElementById('subsProgressFill');
+                if (bar && fill) {
+                    bar.classList.remove('hidden');
+                    const p2 = Math.max(0, Math.min(100, Number(percent) || 0));
+                    fill.style.width = p2 + '%';
+                    fill.textContent = Math.round(p2) + '%';
+                }
+            }
+        }
+
+        function showSubsMessage(type, message) {
+            const status = document.getElementById('subsStatus');
+            if (!status) return;
+            status.className = 'status ' + type;
+            status.textContent = message;
+            status.classList.remove('hidden');
+        }
+
+        async function generateSubtitles() {
+            if (!uploadedVideo || !uploadedVideoBytes) {
+                showSubsMessage('error', '❌ Primero selecciona un video.');
+                return;
+            }
+            const langs = Array.from(document.querySelectorAll('.subtitleLangCheckbox:checked')).map(el => el.value);
+            if (langs.length === 0) {
+                showSubsMessage('error', '❌ Elige al menos un idioma.');
+                return;
+            }
+
+            const btn = document.getElementById('generateSubsBtn');
+            btn.disabled = true;
+            document.getElementById('subsDownloads').innerHTML = '';
+
+            try {
+                setSubsStatus('PREPARANDO AUDIO', 'Extrayendo audio a 16kHz mono (formato que exige Whisper)…', 5);
+                const engine = await initFFmpeg();
+                await engine.writeFile('subs_input.mp4', uploadedVideoBytes.slice());
+                await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', 'subs_audio.pcm']);
+
+                const rawPcm = await engine.readFile('subs_audio.pcm');
+                const floatSamples = new Float32Array(Math.floor(rawPcm.length / 4));
+                new Uint8Array(floatSamples.buffer).set(rawPcm.subarray(0, floatSamples.length * 4));
+
+                await engine.deleteFile('subs_input.mp4').catch(() => {});
+                await engine.deleteFile('subs_audio.pcm').catch(() => {});
+
+                const duration = floatSamples.length / 16000;
+
+                setSubsStatus('CARGANDO IA', 'Descargando y preparando Whisper (solo la primera vez)…', 15);
+
+                const result = await runSubtitleGeneration(floatSamples, duration, langs, (msg) => {
+                    setSubsStatus('GENERANDO SUBTÍTULOS', msg, 55);
+                });
+
+                setSubsStatus('LISTO', 'Subtítulos generados correctamente.', 100);
+                setTimeout(() => document.getElementById('subsProgressBar').classList.add('hidden'), 900);
+
+                const langNames = { es: 'Español', en: 'Inglés', fr: 'Francés', pt: 'Portugués', it: 'Italiano' };
+                const container = document.getElementById('subsDownloads');
+                container.innerHTML = '';
+                let any = false;
+                for (const lang of langs) {
+                    const segments = result[lang];
+                    if (!segments || segments.length === 0) continue;
+                    any = true;
+                    const srt = segmentsToSrt(segments);
+                    const srtBlob = new Blob([srt], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(srtBlob);
+                    ffmpegRuntimeBlobURLs.push(url);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const baseName = (uploadedVideo.name || 'video').replace(/\.[^.]+$/, '');
+                    a.download = baseName + '_' + lang + '.srt';
+                    a.className = 'btn btn-secondary';
+                    a.textContent = '⬇ DESCARGAR .SRT · ' + (langNames[lang] || lang.toUpperCase());
+                    container.appendChild(a);
+                }
+
+                if (any) {
+                    showSubsMessage('success', '✓ Subtítulos listos — descárgalos arriba.');
+                } else {
+                    showSubsMessage('error', '❌ No se detectó voz o texto para generar subtítulos.');
+                }
+            } catch (err) {
+                console.error('Error generando subtítulos:', err);
+                showSubsMessage('error', '❌ No se pudieron generar los subtítulos: ' + (err.message || err));
+            } finally {
+                btn.disabled = !uploadedVideoBytes;
+            }
         }
 
         async function initFFmpeg() {
@@ -574,6 +941,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             let bytesOk = false;
 
             document.getElementById('processVideoBtn').disabled = true;
+            if (document.getElementById('generateSubsBtn')) document.getElementById('generateSubsBtn').disabled = true;
+            document.getElementById('subsDownloads').innerHTML = '';
             document.getElementById('downloadVideoBtn').classList.add('hidden');
             document.getElementById('outputVideo').classList.add('hidden');
             updateProgress(0);
@@ -596,6 +965,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
             function updateProcessButtonState() {
                 document.getElementById('processVideoBtn').disabled = !bytesOk;
+                const subsBtn = document.getElementById('generateSubsBtn');
+                if (subsBtn) subsBtn.disabled = !bytesOk;
             }
 
             function maybeShowCombinedStatus() {
@@ -908,6 +1279,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         window.addEventListener('beforeunload', () => {
             try { if (ffmpeg && typeof ffmpeg.terminate === 'function') ffmpeg.terminate(); } catch (_) {}
             try { if (rnnoiseWorkerInstance) rnnoiseWorkerInstance.terminate(); } catch (_) {}
+            try { if (subtitleWorkerInstance) subtitleWorkerInstance.terminate(); } catch (_) {}
             for (const u of ffmpegRuntimeBlobURLs) {
                 try { URL.revokeObjectURL(u); } catch (_) {}
             }
