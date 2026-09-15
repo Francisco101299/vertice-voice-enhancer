@@ -181,6 +181,17 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         }
 
         let uploadedVideo = null;
+        // BYTES DEL VIDEO YA LEÍDOS EN MEMORIA.
+        // CAUSA RAÍZ DEL ERROR "The requested file could not be read...":
+        // en Android, la referencia al File que entrega <input type="file">
+        // (a menudo respaldada por un content:// del selector del sistema)
+        // puede dejar de ser legible si se lee mucho tiempo después de
+        // seleccionarla (el usuario mira la vista previa, ajusta sliders, etc.).
+        // El <video> puede seguir reproduciendo el blob ya cacheado, pero un
+        // arrayBuffer() posterior sobre el mismo File puede fallar.
+        // Solución: leer el archivo UNA SOLA VEZ, inmediatamente al
+        // seleccionarlo, y reutilizar esos bytes para FFmpeg.
+        let uploadedVideoBytes = null;
         let processedVideoBlob = null;
 
         async function initFFmpeg() {
@@ -391,11 +402,37 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             }
 
             uploadedVideo = file;
+            uploadedVideoBytes = null;
             document.getElementById('processVideoBtn').disabled = true;
             document.getElementById('downloadVideoBtn').classList.add('hidden');
             document.getElementById('outputVideo').classList.add('hidden');
             updateProgress(0);
-            showUploadProgress(true, 5, 'Cargando archivo', 'Preparando el video para la vista previa…');
+            showUploadProgress(true, 5, 'Leyendo archivo', 'Cargando el video en memoria…');
+
+            // CRÍTICO: leemos el File completo AHORA, justo tras seleccionarlo.
+            // No esperamos a "PROCESAR VIDEO" para hacerlo: en Android la
+            // referencia al archivo (sobre todo si viene de un selector de
+            // documentos / proveedor de contenido) puede volverse ilegible
+            // después de un tiempo, aunque el navegador siga pudiendo
+            // reproducir el blob ya generado. Leerlo de inmediato evita el
+            // error "The requested file could not be read...".
+            try {
+                const buffer = await file.arrayBuffer();
+                uploadedVideoBytes = new Uint8Array(buffer);
+            } catch (readErr) {
+                console.error(readErr);
+                showUploadProgress(false);
+                uploadedVideo = null;
+                uploadedVideoBytes = null;
+                showStatus(
+                    'video',
+                    'error',
+                    '❌ No se pudo leer el archivo (permiso perdido tras seleccionarlo). Vuelve a elegir el video e inténtalo de nuevo sin esperar antes de procesar.'
+                );
+                return;
+            }
+
+            showUploadProgress(true, 45, 'Archivo en memoria', 'Preparando la vista previa…');
 
             if (uploadObjectURL) URL.revokeObjectURL(uploadObjectURL);
             uploadObjectURL = URL.createObjectURL(file);
@@ -493,6 +530,10 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 showStatus('video', 'error', '❌ Primero selecciona un video.');
                 return;
             }
+            if (!uploadedVideoBytes) {
+                showStatus('video', 'error', '❌ El archivo ya no está disponible en memoria. Vuelve a seleccionarlo (no esperes demasiado antes de procesar).');
+                return;
+            }
 
             const button = document.getElementById('processVideoBtn');
             button.disabled = true;
@@ -503,7 +544,12 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             try {
                 const engine = await initFFmpeg();
                 setProcessStatus('PREPARANDO ARCHIVO', 'Copiando el video a la memoria local de FFmpeg…', 10);
-                const inputData = new Uint8Array(await uploadedVideo.arrayBuffer());
+                // Usamos los bytes leídos al momento de seleccionar el archivo
+                // (uploadedVideoBytes), NO volvemos a leer el File aquí.
+                // .slice() crea una copia para que, si FFmpeg transfiere/consume
+                // el buffer al enviarlo al Worker, uploadedVideoBytes siga intacto
+                // por si el usuario pulsa "PROCESAR VIDEO" de nuevo.
+                const inputData = uploadedVideoBytes.slice();
                 await engine.writeFile('input.mp4', inputData);
                 updateProgress(20);
 
