@@ -158,6 +158,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         let ffmpeg = null;
         let ffmpegLoaded = false;
         let ffmpegLoading = null;
+        // URLs Blob de FFmpeg se mantienen vivos durante toda la sesión.
+        let ffmpegRuntimeBlobURLs = [];
         let uploadObjectURL = null;
 
         async function loadExternalScript(src) {
@@ -251,7 +253,11 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     throw err;
                 } finally {
                     // No revocamos classWorkerURL aquí: FFmpeg necesita el worker durante toda la sesión.
-                    [coreURL, wasmURL].forEach(u => { if (u) URL.revokeObjectURL(u); });
+                    // NO revocar coreURL/wasmURL aquí: el Worker puede seguir necesitándolos
+                    // durante las operaciones posteriores. Se limpian al cerrar/recargar la página.
+                    [coreURL, wasmURL, classWorkerURL].forEach(u => {
+                        if (u && !ffmpegRuntimeBlobURLs.includes(u)) ffmpegRuntimeBlobURLs.push(u);
+                    });
                     ffmpegLoading = null;
                 }
             })();
@@ -497,7 +503,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             try {
                 const engine = await initFFmpeg();
                 setProcessStatus('PREPARANDO ARCHIVO', 'Copiando el video a la memoria local de FFmpeg…', 10);
-                const inputData = await nativeFetchFile(uploadedVideo);
+                const inputData = new Uint8Array(await uploadedVideo.arrayBuffer());
                 await engine.writeFile('input.mp4', inputData);
                 updateProgress(20);
 
@@ -592,6 +598,15 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         function updateLowcut(val) { document.getElementById('lowcutValue').textContent = val; }
         function updateVideoAutotune(val) { document.getElementById('videoAutotuneValue').textContent = val; }
         function updateVideoNoise(val) { document.getElementById('videoNoiseValue').textContent = val; }
+    </script>
+    <script>
+        window.addEventListener('beforeunload', () => {
+            try { if (ffmpeg && typeof ffmpeg.terminate === 'function') ffmpeg.terminate(); } catch (_) {}
+            for (const u of ffmpegRuntimeBlobURLs) {
+                try { URL.revokeObjectURL(u); } catch (_) {}
+            }
+            ffmpegRuntimeBlobURLs = [];
+        });
     </script>
 </body>
 </html>
