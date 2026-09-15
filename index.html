@@ -128,6 +128,14 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="control-group">
                     <label>Reducción de ruido: <span id="videoNoiseValue">50</span>%</label>
                     <input type="range" id="videoNoise" min="0" max="100" value="50" oninput="updateVideoNoise(this.value)">
+                    <small style="display:block;margin-top:5px;color:#718093;font-size:.66rem;">Solo se usa cuando la IA (abajo) está desactivada o no disponible.</small>
+                </div>
+                <div class="control-group">
+                    <label>🧠 Reducción de ruido con IA (RNNoise) <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></label>
+                    <button class="btn btn-secondary" id="rnnoiseToggleBtn" onclick="toggleRnnoise()">ACTIVAR</button>
+                    <div class="warning" style="margin-top:9px;">
+                        Usa una red neuronal (RNNoise) para separar voz de ruido de fondo con más calidad que el filtro estándar. Descarga ~200KB la primera vez (requiere internet) y el proceso tarda más. Si algo falla, VÉRTICE usa automáticamente el modo estándar sin interrumpir el proceso.
+                    </div>
                 </div>
             </div>
             <div class="section">
@@ -193,6 +201,165 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         // seleccionarlo, y reutilizar esos bytes para FFmpeg.
         let uploadedVideoBytes = null;
         let processedVideoBlob = null;
+
+        // ==========================================================
+        // RNNOISE (Nivel 2: denoiser neuronal real, vía WASM)
+        // ==========================================================
+        // Librería real, activa y documentada: @shiguredo/rnnoise-wasm
+        // (https://github.com/shiguredo/rnnoise-wasm). API verificada:
+        //   import { Rnnoise } from '@shiguredo/rnnoise-wasm';
+        //   const rnnoise = await Rnnoise.load();
+        //   const state = rnnoise.createDenoiseState();
+        //   state.processFrame(frame); // in-place, bloques de 480 muestras
+        //
+        // DATOS CRÍTICOS DE LA LIBRERÍA (verificados, no inventados):
+        // - Trabaja SIEMPRE a 48kHz mono, en bloques fijos de 480 muestras
+        //   (10ms). Un tamaño de bloque distinto no funciona.
+        // - Los valores de entrada NO van en el rango [-1,1] de Web Audio:
+        //   RNNoise espera floats en la escala de un entero de 16 bits,
+        //   es decir aproximadamente [-32768, 32767]. Hay que multiplicar
+        //   por 32768 antes de procesar y dividir por 32768 al terminar.
+        //   (Esto es el motivo #1 de audio distorsionado en integraciones
+        //   mal hechas de RNNoise: usar el rango equivocado).
+        //
+        // El modelo se ejecuta en un Worker propio (creado con Blob URL,
+        // mismo patrón same-origin que usamos para el Worker de FFmpeg)
+        // para no congelar la interfaz mientras procesa. Dentro del Worker
+        // se hace un import() dinámico del paquete real desde jsDelivr;
+        // esto NO tiene el problema de "Worker cross-origin" que tuvimos
+        // con FFmpeg, porque solo estamos importando un módulo ES dentro
+        // de un Worker que SÍ es same-origin (Blob), no creando el Worker
+        // directamente desde una URL de CDN.
+        //
+        // ADVERTENCIA HONESTA: el bundling automático de jsDelivr (+esm)
+        // para paquetes con WASM no lo pude probar en un navegador real
+        // desde este entorno. El código está escrito exactamente contra
+        // la API documentada del paquete, pero si esa carga fallara por
+        // cualquier motivo (red, CORS, cambio de versión), el sistema
+        // cae automáticamente al modo estándar (afftdn) sin romper el
+        // flujo de "PROCESAR VIDEO".
+        let rnnoiseEnabled = false;
+        let rnnoiseWorkerInstance = null;
+        let rnnoiseMsgId = 0;
+
+        const RNNOISE_WORKER_SRC = `
+            let rnnoiseLoadPromise = null;
+            let denoiseState = null;
+            const FRAME_SIZE = 480;   // bloque fijo exigido por RNNoise (10ms a 48kHz)
+            const PCM_SCALE = 32768;  // RNNoise espera escala de entero de 16 bits, no [-1,1]
+
+            async function getDenoiseState() {
+                if (denoiseState) return denoiseState;
+                if (!rnnoiseLoadPromise) {
+                    rnnoiseLoadPromise = import('https://cdn.jsdelivr.net/npm/@shiguredo/rnnoise-wasm@2025.1.5/+esm');
+                }
+                const mod = await rnnoiseLoadPromise;
+                const Rnnoise = mod.Rnnoise || mod.default?.Rnnoise;
+                if (!Rnnoise || typeof Rnnoise.load !== 'function') {
+                    throw new Error('El módulo RNNoise no expone la API esperada (Rnnoise.load).');
+                }
+                const rnnoise = await Rnnoise.load();
+                denoiseState = rnnoise.createDenoiseState();
+                return denoiseState;
+            }
+
+            self.onmessage = async (event) => {
+                const { id, samples } = event.data;
+                try {
+                    const state = await getDenoiseState();
+                    const input = new Float32Array(samples);
+                    const totalFrames = Math.ceil(input.length / FRAME_SIZE) || 1;
+                    const output = new Float32Array(totalFrames * FRAME_SIZE);
+                    const frame = new Float32Array(FRAME_SIZE);
+
+                    for (let f = 0; f < totalFrames; f++) {
+                        const start = f * FRAME_SIZE;
+                        const end = Math.min(start + FRAME_SIZE, input.length);
+                        frame.fill(0);
+                        for (let i = start; i < end; i++) frame[i - start] = input[i] * PCM_SCALE;
+
+                        state.processFrame(frame);
+
+                        for (let i = 0; i < FRAME_SIZE; i++) output[start + i] = frame[i] / PCM_SCALE;
+
+                        if (f % 200 === 0) {
+                            self.postMessage({ id, type: 'progress', progress: f / totalFrames });
+                        }
+                    }
+
+                    const trimmed = output.slice(0, input.length);
+                    self.postMessage({ id, type: 'done', result: trimmed }, [trimmed.buffer]);
+                } catch (err) {
+                    self.postMessage({ id, type: 'error', message: (err && err.message) || String(err) });
+                }
+            };
+        `;
+
+        function getRnnoiseWorker() {
+            if (rnnoiseWorkerInstance) return rnnoiseWorkerInstance;
+            const blob = new Blob([RNNOISE_WORKER_SRC], { type: 'text/javascript' });
+            const url = URL.createObjectURL(blob);
+            ffmpegRuntimeBlobURLs.push(url); // se revoca al cerrar/recargar, igual que los blobs de FFmpeg
+            rnnoiseWorkerInstance = new Worker(url);
+            return rnnoiseWorkerInstance;
+        }
+
+        function runRnnoiseDenoise(monoFloat48k, onProgress) {
+            return new Promise((resolve, reject) => {
+                let worker;
+                try {
+                    worker = getRnnoiseWorker();
+                } catch (err) {
+                    reject(err);
+                    return;
+                }
+
+                const id = ++rnnoiseMsgId;
+                const timeoutMs = 180000; // margen amplio; si tarda más, algo va mal
+
+                const timeout = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('RNNoise tardó demasiado en responder (tiempo límite alcanzado).'));
+                }, timeoutMs);
+
+                function handleMessage(e) {
+                    if (!e.data || e.data.id !== id) return;
+                    if (e.data.type === 'progress') {
+                        if (onProgress) onProgress(e.data.progress);
+                    } else if (e.data.type === 'done') {
+                        clearTimeout(timeout);
+                        cleanup();
+                        resolve(e.data.result);
+                    } else if (e.data.type === 'error') {
+                        clearTimeout(timeout);
+                        cleanup();
+                        reject(new Error(e.data.message || 'Error desconocido en RNNoise.'));
+                    }
+                }
+                function handleWorkerError(e) {
+                    clearTimeout(timeout);
+                    cleanup();
+                    reject(new Error('El Worker de RNNoise falló: ' + (e?.message || 'error desconocido')));
+                }
+                function cleanup() {
+                    worker.removeEventListener('message', handleMessage);
+                    worker.removeEventListener('error', handleWorkerError);
+                }
+                worker.addEventListener('message', handleMessage);
+                worker.addEventListener('error', handleWorkerError);
+
+                const copy = monoFloat48k.slice(); // copia propia para poder transferir el buffer sin afectar al llamador
+                worker.postMessage({ id, samples: copy.buffer }, [copy.buffer]);
+            });
+        }
+
+        function toggleRnnoise() {
+            rnnoiseEnabled = !rnnoiseEnabled;
+            const btn = document.getElementById('rnnoiseToggleBtn');
+            btn.textContent = rnnoiseEnabled ? 'DESACTIVAR' : 'ACTIVAR';
+            btn.classList.toggle('btn-primary', rnnoiseEnabled);
+            btn.classList.toggle('btn-secondary', !rnnoiseEnabled);
+        }
 
         async function initFFmpeg() {
             if (ffmpeg && ffmpegLoaded) return ffmpeg;
@@ -593,17 +760,78 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 const denoise = Math.max(0.01, Math.min(1, noiseReduction / 100));
                 const volume = (1 + autotuneIntensity / 250).toFixed(2);
 
-                setProcessStatus('PROCESANDO AUDIO', 'Aplicando limpieza y nivelación a la pista…', 25);
+                let useRnnoise = rnnoiseEnabled;
+                let rnnoiseFailed = false;
 
-                await engine.exec([
-                    '-i', 'input.mp4',
-                    '-af', `highpass=f=70,lowpass=f=16000,afftdn=nr=${Math.round(8 + denoise * 12)},acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=2,volume=${volume}`,
-                    '-c:v', 'copy',
-                    '-c:a', 'aac',
-                    '-b:a', '192k',
-                    '-movflags', '+faststart',
-                    'output.mp4'
-                ]);
+                if (useRnnoise) {
+                    try {
+                        setProcessStatus('IA · EXTRAYENDO AUDIO', 'Preparando audio en 48kHz mono para el modelo…', 28);
+                        // Extraemos y remuestreamos el audio a PCM crudo (f32le, 48kHz,
+                        // mono) porque RNNoise exige exactamente ese formato. FFmpeg se
+                        // encarga del remuestreo con buena calidad.
+                        await engine.exec(['-i', 'input.mp4', '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', 'audio_raw.pcm']);
+
+                        const rawPcm = await engine.readFile('audio_raw.pcm');
+                        // Copiamos a un buffer nuevo para garantizar alineación de 4 bytes
+                        // antes de interpretarlo como Float32Array.
+                        const floatSamples = new Float32Array(Math.floor(rawPcm.length / 4));
+                        new Uint8Array(floatSamples.buffer).set(rawPcm.subarray(0, floatSamples.length * 4));
+
+                        setProcessStatus('IA · CARGANDO MODELO', 'Descargando y preparando RNNoise (solo la primera vez)…', 34);
+
+                        const denoised = await runRnnoiseDenoise(floatSamples, (p) => {
+                            setProcessStatus('IA · REDUCIENDO RUIDO', 'La red neuronal está limpiando la voz…', 38 + Math.round(p * 30));
+                        });
+
+                        await engine.writeFile('audio_denoised.pcm', new Uint8Array(denoised.buffer));
+                        await engine.deleteFile('audio_raw.pcm').catch(() => {});
+
+                        setProcessStatus('PROCESANDO AUDIO', 'Aplicando nivelación final sobre el audio ya limpiado por IA…', 70);
+
+                        // Segunda pasada: mezclamos el video original con el audio ya
+                        // limpiado por RNNoise. Ya no aplicamos afftdn (sería redundante),
+                        // pero mantenemos el resto de la cadena (EQ, compresor, volumen).
+                        await engine.exec([
+                            '-i', 'input.mp4',
+                            '-f', 'f32le', '-ar', '48000', '-ac', '1', '-i', 'audio_denoised.pcm',
+                            '-map', '0:v:0', '-map', '1:a:0',
+                            '-af', `highpass=f=70,lowpass=f=16000,acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=2,volume=${volume}`,
+                            '-c:v', 'copy',
+                            '-c:a', 'aac',
+                            '-b:a', '192k',
+                            '-movflags', '+faststart',
+                            'output.mp4'
+                        ]);
+
+                        await engine.deleteFile('audio_denoised.pcm').catch(() => {});
+                    } catch (rnErr) {
+                        console.error('RNNoise no disponible, usando modo estándar:', rnErr);
+                        rnnoiseFailed = true;
+                        useRnnoise = false;
+                        await engine.deleteFile('audio_raw.pcm').catch(() => {});
+                        await engine.deleteFile('audio_denoised.pcm').catch(() => {});
+                    }
+                }
+
+                if (!useRnnoise) {
+                    setProcessStatus(
+                        'PROCESANDO AUDIO',
+                        rnnoiseFailed
+                            ? 'La IA no estuvo disponible en este dispositivo; aplicando limpieza estándar…'
+                            : 'Aplicando limpieza y nivelación a la pista…',
+                        45
+                    );
+
+                    await engine.exec([
+                        '-i', 'input.mp4',
+                        '-af', `highpass=f=70,lowpass=f=16000,afftdn=nr=${Math.round(8 + denoise * 12)},acompressor=threshold=-18dB:ratio=3:attack=5:release=80:makeup=2,volume=${volume}`,
+                        '-c:v', 'copy',
+                        '-c:a', 'aac',
+                        '-b:a', '192k',
+                        '-movflags', '+faststart',
+                        'output.mp4'
+                    ]);
+                }
 
                 setProcessStatus('FINALIZANDO', 'Generando el archivo MP4 final…', 92);
 
@@ -679,6 +907,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
     <script>
         window.addEventListener('beforeunload', () => {
             try { if (ffmpeg && typeof ffmpeg.terminate === 'function') ffmpeg.terminate(); } catch (_) {}
+            try { if (rnnoiseWorkerInstance) rnnoiseWorkerInstance.terminate(); } catch (_) {}
             for (const u of ffmpegRuntimeBlobURLs) {
                 try { URL.revokeObjectURL(u); } catch (_) {}
             }
