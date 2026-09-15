@@ -384,7 +384,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
             const maxSize = 500 * 1024 * 1024;
             const allowed = ['video/mp4', 'video/webm', 'video/quicktime'];
-            const extOK = /\\.(mp4|webm|mov)$/i.test(file.name);
+            const extOK = /\.(mp4|webm|mov)$/i.test(file.name);
 
             if (!allowed.includes(file.type) && !extOK) {
                 showStatus('video', 'error', '❌ Formato no compatible. Usa MP4, WebM o MOV.');
@@ -403,37 +403,43 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
             uploadedVideo = file;
             uploadedVideoBytes = null;
+            let previewOk = false;
+            let bytesOk = false;
+
             document.getElementById('processVideoBtn').disabled = true;
             document.getElementById('downloadVideoBtn').classList.add('hidden');
             document.getElementById('outputVideo').classList.add('hidden');
             updateProgress(0);
-            showUploadProgress(true, 5, 'Leyendo archivo', 'Cargando el video en memoria…');
+            showUploadProgress(true, 5, 'Cargando archivo', 'Preparando el video para la vista previa…');
 
-            // CRÍTICO: leemos el File completo AHORA, justo tras seleccionarlo.
-            // No esperamos a "PROCESAR VIDEO" para hacerlo: en Android la
-            // referencia al archivo (sobre todo si viene de un selector de
-            // documentos / proveedor de contenido) puede volverse ilegible
-            // después de un tiempo, aunque el navegador siga pudiendo
-            // reproducir el blob ya generado. Leerlo de inmediato evita el
-            // error "The requested file could not be read...".
-            try {
-                const buffer = await file.arrayBuffer();
-                uploadedVideoBytes = new Uint8Array(buffer);
-            } catch (readErr) {
-                console.error(readErr);
-                showUploadProgress(false);
-                uploadedVideo = null;
-                uploadedVideoBytes = null;
-                showStatus(
-                    'video',
-                    'error',
-                    '❌ No se pudo leer el archivo (permiso perdido tras seleccionarlo). Vuelve a elegir el video e inténtalo de nuevo sin esperar antes de procesar.'
-                );
-                return;
+            document.getElementById('videoInfo').textContent =
+                '📹 ' + file.name + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
+            document.getElementById('videoInfo').classList.remove('hidden');
+
+            // IMPORTANTE: la vista previa (<video>) y la lectura de bytes para
+            // FFmpeg son DOS PROCESOS INDEPENDIENTES que corren EN PARALELO.
+            // Antes se hacían en serie (leer todo el archivo -> luego mostrar
+            // preview), lo cual en un dispositivo con poca batería/memoria
+            // puede demorar tanto que el propio <video> termina fallando al
+            // cargar. Además, el reproductor <video> del navegador y el
+            // demuxer interno de FFmpeg.wasm son motores distintos: uno puede
+            // fallar sin que el otro falle. Por eso "PROCESAR VIDEO" se activa
+            // en cuanto los BYTES estén listos, sin depender de que la
+            // vista previa haya funcionado.
+
+            function updateProcessButtonState() {
+                document.getElementById('processVideoBtn').disabled = !bytesOk;
             }
 
-            showUploadProgress(true, 45, 'Archivo en memoria', 'Preparando la vista previa…');
+            function maybeShowCombinedStatus() {
+                if (bytesOk && previewOk) {
+                    showStatus('video', 'success', '✓ VIDEO CARGADO · ' + file.name + ' · ' + (file.size / 1024 / 1024).toFixed(1) + ' MB');
+                } else if (bytesOk && !previewOk) {
+                    showStatus('video', 'info', '⚠️ La vista previa no pudo reproducirse en este navegador, pero el archivo se leyó correctamente y SÍ puede procesarse con FFmpeg.');
+                }
+            }
 
+            // --- 1) Vista previa (independiente) ---
             if (uploadObjectURL) URL.revokeObjectURL(uploadObjectURL);
             uploadObjectURL = URL.createObjectURL(file);
 
@@ -445,29 +451,54 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             };
 
             videoPreview.oncanplay = () => {
+                previewOk = true;
                 showUploadProgress(true, 100, 'VIDEO LISTO', 'El video está cargado y listo para procesar.');
                 setTimeout(() => showUploadProgress(false), 700);
-                document.getElementById('processVideoBtn').disabled = false;
-                showStatus(
-                    'video',
-                    'success',
-                    '✓ VIDEO CARGADO · ' + file.name + ' · ' + (file.size / 1024 / 1024).toFixed(1) + ' MB'
-                );
+                maybeShowCombinedStatus();
             };
 
             videoPreview.onerror = () => {
+                previewOk = false;
                 showUploadProgress(false);
-                document.getElementById('processVideoBtn').disabled = true;
-                showStatus('video', 'error', '❌ No se pudo leer el video en este navegador.');
+                const mediaErr = videoPreview.error;
+                const codeNames = { 1: 'ABORTADO', 2: 'ERROR_DE_RED', 3: 'ERROR_DE_DECODIFICACIÓN', 4: 'FORMATO_NO_SOPORTADO' };
+                const codeName = mediaErr ? (codeNames[mediaErr.code] || ('CÓDIGO_' + mediaErr.code)) : 'DESCONOCIDO';
+                if (bytesOk) {
+                    showStatus('video', 'info', `⚠️ El navegador no pudo mostrar la vista previa (${codeName}), pero el archivo se leyó correctamente y SÍ puede procesarse con FFmpeg.`);
+                } else {
+                    showStatus('video', 'error', `❌ No se pudo leer el video en este navegador (${codeName}).`);
+                }
             };
 
             videoPreview.src = uploadObjectURL;
             videoPreview.load();
             videoPreview.classList.remove('hidden');
 
-            document.getElementById('videoInfo').textContent =
-                '📹 ' + file.name + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB';
-            document.getElementById('videoInfo').classList.remove('hidden');
+            // --- 2) Lectura de bytes para FFmpeg (independiente, en paralelo) ---
+            // Se inicia YA, apenas se selecciona el archivo, para evitar el
+            // problema de referencias a File que caducan en Android si se
+            // espera demasiado antes de leerlas.
+            (async () => {
+                try {
+                    const buffer = await file.arrayBuffer();
+                    if (uploadedVideo !== file) return; // el usuario ya eligió otro archivo mientras tanto
+                    uploadedVideoBytes = new Uint8Array(buffer);
+                    bytesOk = true;
+                    updateProcessButtonState();
+                    maybeShowCombinedStatus();
+                } catch (readErr) {
+                    console.error(readErr);
+                    if (uploadedVideo !== file) return;
+                    uploadedVideoBytes = null;
+                    bytesOk = false;
+                    updateProcessButtonState();
+                    showStatus(
+                        'video',
+                        'error',
+                        '❌ No se pudo cargar el archivo en memoria para procesarlo (permiso perdido tras seleccionarlo). Vuelve a elegirlo e inténtalo de nuevo.'
+                    );
+                }
+            })();
 
             // La selección de un archivo local no tiene una subida a servidor:
             // el archivo permanece en el dispositivo y se procesa localmente.
