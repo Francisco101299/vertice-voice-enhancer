@@ -184,6 +184,20 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="warning" style="margin-top:9px;">
                     Usa un modelo de IA (Whisper) que se descarga la primera vez (decenas de MB) y corre 100% en tu dispositivo. La calidad depende del modelo y de la claridad del audio; nombres propios o acentos fuertes pueden generar errores.
                 </div>
+                <div id="burnSection" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
+                    <label>Quemar subtítulos en el video</label>
+                    <select id="burnLangSelect" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
+                    <button class="btn btn-secondary" id="burnSubsBtn" onclick="burnSubtitles()" style="margin-top:10px;">🔥 QUEMAR EN VIDEO</button>
+                    <div id="burnStatus" class="status hidden"></div>
+                    <div class="progress-bar hidden" id="burnProgressBar">
+                        <div class="progress-fill" id="burnProgressFill">0%</div>
+                    </div>
+                    <video id="burnOutputVideo" controls class="hidden" style="margin-top:10px;"></video>
+                    <button class="btn btn-secondary hidden" id="downloadBurnBtn" style="margin-top:8px;">⬇ DESCARGAR VIDEO CON SUBTÍTULOS</button>
+                    <div class="warning" style="margin-top:9px;">
+                        Esto vuelve a codificar el video (no solo el audio), así que tarda más. Se aplica sobre el video original subido, con el audio sin cambios.
+                    </div>
+                </div>
             </div>
         </div>
         <div class="pro-footer"><span>VÉRTICE VC-1</span><span>PRO ENGINE · LOCAL DSP</span><span>BUILD 01</span></div>
@@ -423,6 +437,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         // en el panel de subtítulos — no debería romper el resto de la app.
         let subtitleWorkerInstance = null;
         let subtitleMsgId = 0;
+        let lastSubtitleResult = null; // { es: [...], en: [...], ... } del último GENERAR SUBTÍTULOS
+        let subtitleFontBytes = null; // cache de la tipografía para quemar subtítulos
 
         const SUBTITLE_WORKER_SRC = `
             let pipelinePromise = null;
@@ -717,6 +733,17 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 if (any) {
                     showSubsMessage('success', '✓ Subtítulos listos — descárgalos arriba.');
+                    lastSubtitleResult = result;
+                    const burnSelect = document.getElementById('burnLangSelect');
+                    burnSelect.innerHTML = '';
+                    for (const lang of langs) {
+                        if (!result[lang] || result[lang].length === 0) continue;
+                        const opt = document.createElement('option');
+                        opt.value = lang;
+                        opt.textContent = langNames[lang] || lang.toUpperCase();
+                        burnSelect.appendChild(opt);
+                    }
+                    document.getElementById('burnSection').classList.remove('hidden');
                 } else {
                     showSubsMessage('error', '❌ No se detectó voz o texto para generar subtítulos.');
                 }
@@ -725,6 +752,169 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 showSubsMessage('error', '❌ No se pudieron generar los subtítulos: ' + (err.message || err));
             } finally {
                 btn.disabled = !uploadedVideoBytes;
+            }
+        }
+
+        // ==========================================================
+        // QUEMAR SUBTÍTULOS EN EL VIDEO (drawtext, SIN libass)
+        // ==========================================================
+        // Verifiqué que la build oficial de @ffmpeg/core (la que ya usamos)
+        // NO incluye libass — la documentación oficial de ffmpeg.wasm solo
+        // lista x265, libvpx, theora, lame, vorbis, opus y freetype2. Por lo
+        // tanto el filtro "subtitles" (que necesita libass) fallaría. Sí
+        // podemos usar "drawtext" (usa freetype2, que sí está incluido).
+        //
+        // TRAMPA CONOCIDA Y EVITADA: pasar el texto directo como
+        // drawtext=text='...' es una fuente clásica de bugs cuando el texto
+        // trae apóstrofes (comunes en francés/italiano/portugués: "l'heure",
+        // "dell'anno") — el escapado de comillas en el parser de filtros de
+        // FFmpeg es notoriamente confuso y frágil. Lo evitamos casi por
+        // completo escribiendo cada línea de subtítulo en su PROPIO archivo
+        // de texto dentro del sistema de archivos virtual de FFmpeg, y
+        // usando drawtext=textfile=... en vez de text=... — así el
+        // contenido del subtítulo no pasa por el parser de opciones del
+        // filtro en absoluto.
+        const SUBTITLE_FONT_URL = 'https://cdn.jsdelivr.net/npm/connect-fonts-roboto@0.0.5/fonts/default/roboto-regular.ttf';
+
+        async function getSubtitleFontBytes() {
+            if (subtitleFontBytes) return subtitleFontBytes;
+            const resp = await fetch(SUBTITLE_FONT_URL);
+            if (!resp.ok) throw new Error('No se pudo descargar la tipografía para los subtítulos (' + resp.status + ').');
+            subtitleFontBytes = new Uint8Array(await resp.arrayBuffer());
+            return subtitleFontBytes;
+        }
+
+        function setBurnStatus(title, detail, percent = null) {
+            const status = document.getElementById('burnStatus');
+            if (!status) return;
+            if (percent === 0 && title.startsWith('ERROR')) {
+                status.className = 'status error';
+                status.innerHTML = '❌ <strong>' + escapeHtml(title) + '</strong><br>' + escapeHtml(detail);
+            } else {
+                status.className = 'status processing';
+                const p = percent == null ? '' : ` · ${Math.round(percent)}%`;
+                status.innerHTML =
+                    '<span class="process-status-line"><span class="spinner"></span><strong>' +
+                    escapeHtml(title) + '</strong>' + p + '</span><br><small>' +
+                    escapeHtml(detail) + '</small>';
+            }
+            status.classList.remove('hidden');
+            if (percent != null) {
+                const bar = document.getElementById('burnProgressBar');
+                const fill = document.getElementById('burnProgressFill');
+                if (bar && fill) {
+                    bar.classList.remove('hidden');
+                    const p2 = Math.max(0, Math.min(100, Number(percent) || 0));
+                    fill.style.width = p2 + '%';
+                    fill.textContent = Math.round(p2) + '%';
+                }
+            }
+        }
+
+        function showBurnMessage(type, message) {
+            const status = document.getElementById('burnStatus');
+            if (!status) return;
+            status.className = 'status ' + type;
+            status.textContent = message;
+            status.classList.remove('hidden');
+        }
+
+        async function burnSubtitles() {
+            const lang = document.getElementById('burnLangSelect').value;
+            const segments = lastSubtitleResult && lastSubtitleResult[lang];
+            if (!uploadedVideoBytes || !segments || segments.length === 0) {
+                showBurnMessage('error', '❌ Primero genera los subtítulos de este idioma.');
+                return;
+            }
+
+            const btn = document.getElementById('burnSubsBtn');
+            btn.disabled = true;
+            document.getElementById('downloadBurnBtn').classList.add('hidden');
+            document.getElementById('burnOutputVideo').classList.add('hidden');
+
+            // Aviso honesto: muchos segmentos = un filtro drawtext encadenado
+            // por cada uno, lo que puede volverse lento de renderizar.
+            if (segments.length > 150) {
+                setBurnStatus('AVISO', 'El video tiene ' + segments.length + ' líneas de subtítulo — esto puede tardar bastante. Continuando…', 5);
+            }
+
+            const writtenFiles = ['burn_input.mp4', 'burn_font.ttf'];
+            try {
+                setBurnStatus('PREPARANDO', 'Cargando tipografía y video…', 8);
+                const engine = await initFFmpeg();
+                const fontBytes = await getSubtitleFontBytes();
+                await engine.writeFile('burn_font.ttf', fontBytes.slice());
+                await engine.writeFile('burn_input.mp4', uploadedVideoBytes.slice());
+
+                setBurnStatus('PREPARANDO TEXTOS', 'Escribiendo ' + segments.length + ' líneas de subtítulo…', 15);
+                const filterParts = [];
+                for (let i = 0; i < segments.length; i++) {
+                    const seg = segments[i];
+                    const fname = 'seg_' + i + '.txt';
+                    writtenFiles.push(fname);
+                    await engine.writeFile(fname, new TextEncoder().encode(seg.text));
+                    const start = Math.max(0, seg.start).toFixed(2);
+                    const end = Math.max(Number(start) + 0.05, seg.end).toFixed(2);
+                    filterParts.push(
+                        "drawtext=textfile=" + fname +
+                        ":fontfile=burn_font.ttf" +
+                        ":expansion=none" +
+                        ":fontsize=28:fontcolor=white" +
+                        ":box=1:boxcolor=black@0.55:boxborderw=10" +
+                        ":x=(w-text_w)/2:y=h-text_h-40" +
+                        ":enable='between(t," + start + "," + end + ")'"
+                    );
+                }
+                const filterChain = filterParts.join(',');
+
+                setBurnStatus('QUEMANDO SUBTÍTULOS', 'Recodificando el video (puede tardar varios minutos)…', 30);
+                await engine.exec([
+                    '-i', 'burn_input.mp4',
+                    '-vf', filterChain,
+                    '-c:v', 'libx264',
+                    '-preset', 'veryfast',
+                    '-crf', '23',
+                    '-c:a', 'copy',
+                    '-movflags', '+faststart',
+                    'burn_output.mp4'
+                ]);
+
+                setBurnStatus('FINALIZANDO', 'Generando el archivo final…', 92);
+                const data = await engine.readFile('burn_output.mp4');
+                const blob = new Blob([data.buffer], { type: 'video/mp4' });
+                const url = URL.createObjectURL(blob);
+                ffmpegRuntimeBlobURLs.push(url);
+
+                const video = document.getElementById('burnOutputVideo');
+                video.src = url;
+                video.classList.remove('hidden');
+
+                const downloadBtn = document.getElementById('downloadBurnBtn');
+                downloadBtn.classList.remove('hidden');
+                downloadBtn.onclick = () => {
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const baseName = (uploadedVideo.name || 'video').replace(/\.[^.]+$/, '');
+                    a.download = baseName + '_subtitulado_' + lang + '.mp4';
+                    a.click();
+                };
+
+                setBurnStatus('LISTO', 'Video con subtítulos generado correctamente.', 100);
+                setTimeout(() => document.getElementById('burnProgressBar').classList.add('hidden'), 900);
+                showBurnMessage('success', '✓ Video con subtítulos listo — reprodúcelo o descárgalo arriba.');
+
+                await engine.deleteFile('burn_output.mp4').catch(() => {});
+            } catch (err) {
+                console.error('Error quemando subtítulos:', err);
+                showBurnMessage('error', '❌ No se pudo quemar el subtítulo en el video: ' + (err.message || err));
+            } finally {
+                const engine = ffmpeg;
+                if (engine) {
+                    for (const f of writtenFiles) {
+                        await engine.deleteFile(f).catch(() => {});
+                    }
+                }
+                btn.disabled = false;
             }
         }
 
