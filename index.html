@@ -777,7 +777,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         // usando drawtext=textfile=... en vez de text=... — así el
         // contenido del subtítulo no pasa por el parser de opciones del
         // filtro en absoluto.
-        const SUBTITLE_FONT_URL = 'https://cdn.jsdelivr.net/npm/connect-fonts-roboto@0.0.5/fonts/default/roboto-regular.ttf';
+        const SUBTITLE_FONT_URL = 'https://cdn.jsdelivr.net/npm/connect-fonts-roboto@0.0.5/fonts/default/roboto-bold.ttf';
 
         async function getSubtitleFontBytes() {
             if (subtitleFontBytes) return subtitleFontBytes;
@@ -895,13 +895,13 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 // en horizontal ancho. Recortado a un rango razonable.
                 const fontSize = Math.max(20, Math.min(56, Math.round(videoWidth * 0.045)));
 
-                // Estimación del ancho promedio de un carácter para esta
-                // tipografía y tamaño (~0.58× el fontsize es razonable para
-                // una fuente proporcional tipo Roboto). Con esto calculamos
+                // Estimación del ancho promedio de un carácter, para saber
                 // cuántos caracteres caben por línea dejando margen a los
-                // lados, y partimos el texto en varias líneas si hace falta.
-                const avgCharWidth = fontSize * 0.58;
-                const maxCharsPerLine = Math.max(12, Math.floor((videoWidth * 0.92) / avgCharWidth));
+                // lados, y partir el texto en varias líneas si hace falta.
+                // 0.62 en vez de 0.58: con la tipografía en negrita (Bold) los
+                // caracteres son un poco más anchos que en la versión Regular.
+                const avgCharWidth = fontSize * 0.62;
+                const maxCharsPerLine = Math.min(38, Math.max(12, Math.floor((videoWidth * 0.92) / avgCharWidth)));
 
                 function wrapSubtitleText(text) {
                     const words = text.split(/\s+/).filter(Boolean);
@@ -934,10 +934,11 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                         "drawtext=textfile=" + fname +
                         ":fontfile=burn_font.ttf" +
                         ":expansion=none" +
-                        ":fontsize=" + fontSize + ":fontcolor=white" +
-                        ":box=1:boxcolor=black@0.55:boxborderw=10" +
-                        ":line_spacing=4" +
-                        ":x=(w-text_w)/2:y=h-text_h-40" +
+                        ":fontsize=" + fontSize + ":fontcolor=0xEAFFF2" +
+                        ":bordercolor=0x00F260@0.65:borderw=1.6" +
+                        ":box=1:boxcolor=0x0B1119@0.8:boxborderw=16" +
+                        ":line_spacing=10" +
+                        ":x=(w-text_w)/2:y=h-text_h-48" +
                         ":enable='between(t," + start + "," + end + ")'"
                     );
                 }
