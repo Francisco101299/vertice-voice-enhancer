@@ -535,9 +535,26 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             async function getWhisper(id) {
                 if (whisperPipeline) return whisperPipeline;
                 const pipelineFn = await getPipelineFn();
-                whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
-                    progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
-                });
+                // Mismo modelo, mismos pesos, misma calidad — solo cambia el
+                // hardware que hace el cálculo. WebGPU (la GPU del celular)
+                // suele ser notablemente más rápido que WASM (CPU). Es una
+                // API todavía experimental en navegadores, así que si falla
+                // al cargar (dispositivo/navegador sin soporte, o algún
+                // problema de driver), caemos automáticamente a CPU sin
+                // interrumpir el proceso.
+                try {
+                    self.postMessage({ id, type: 'status', message: 'Probando aceleración por GPU (WebGPU)…' });
+                    whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
+                        device: 'webgpu',
+                        progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
+                    });
+                    self.postMessage({ id, type: 'status', message: 'GPU disponible — usando aceleración por hardware.' });
+                } catch (gpuErr) {
+                    self.postMessage({ id, type: 'status', message: 'GPU no disponible en este dispositivo, usando CPU…' });
+                    whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
+                        progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
+                    });
+                }
                 return whisperPipeline;
             }
 
