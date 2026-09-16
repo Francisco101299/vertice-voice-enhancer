@@ -187,6 +187,13 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div id="burnSection" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
                     <label>Quemar subtítulos en el video</label>
                     <select id="burnLangSelect" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
+                    <select id="subtitleStyleSelect" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;">
+                        <option value="vertice">VÉRTICE (marca) — caja oscura, borde verde</option>
+                        <option value="clasico">Clásico blanco — sombra, sin fondo</option>
+                        <option value="netflix">Netflix / Minimalista — caja negra suave</option>
+                        <option value="amarillo">Amarillo cine — borde negro, sin fondo</option>
+                        <option value="impacto">Impacto / Redes — borde negro grueso, sin fondo</option>
+                    </select>
                     <button class="btn btn-secondary" id="burnSubsBtn" onclick="burnSubtitles()" style="margin-top:10px;">🔥 QUEMAR EN VIDEO</button>
                     <div id="burnStatus" class="status hidden"></div>
                     <div class="progress-bar hidden" id="burnProgressBar">
@@ -779,6 +786,41 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         // filtro en absoluto.
         const SUBTITLE_FONT_URL = 'https://cdn.jsdelivr.net/npm/connect-fonts-roboto@0.0.5/fonts/default/roboto-bold.ttf';
 
+        // Cinco estilos profesionales de subtítulo, todos usando solo
+        // opciones reales y documentadas de drawtext (fontcolor, box*,
+        // bordercolor/borderw para el contorno del texto, shadowcolor/
+        // shadowx/shadowy para la sombra). Cada uno devuelve el fragmento
+        // de opciones que se concatena al resto del filtro.
+        const SUBTITLE_STYLES = {
+            vertice: () =>
+                ':fontcolor=0xEAFFF2' +
+                ':bordercolor=0x00F260@0.65:borderw=1.6' +
+                ':box=1:boxcolor=0x0B1119@0.8:boxborderw=16',
+            clasico: () =>
+                // El estilo pedido: blanco, sombra negra, SIN fondo/caja.
+                // Se suma un contorno fino negro además de la sombra: sin
+                // caja de fondo, un contorno ayuda a que el texto blanco
+                // siga siendo legible sobre fondos claros del video.
+                ':fontcolor=white' +
+                ':bordercolor=black@0.85:borderw=2' +
+                ':shadowcolor=black@0.65:shadowx=2:shadowy=2' +
+                ':box=0',
+            netflix: () =>
+                ':fontcolor=white' +
+                ':box=1:boxcolor=black@0.6:boxborderw=12',
+            amarillo: () =>
+                // Estilo "subtítulo de cine/DVD": amarillo con contorno negro.
+                ':fontcolor=0xFFE034' +
+                ':bordercolor=black@0.9:borderw=2.2' +
+                ':box=0',
+            impacto: () =>
+                // Estilo tipo captions de redes sociales: blanco con
+                // contorno negro grueso, sin fondo, muy legible en miniatura.
+                ':fontcolor=white' +
+                ':bordercolor=black:borderw=3.2' +
+                ':box=0'
+        };
+
         async function getSubtitleFontBytes() {
             if (subtitleFontBytes) return subtitleFontBytes;
             const resp = await fetch(SUBTITLE_FONT_URL);
@@ -921,6 +963,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }
 
                 setBurnStatus('PREPARANDO TEXTOS', 'Escribiendo ' + segments.length + ' líneas de subtítulo…', 15);
+                const styleKey = document.getElementById('subtitleStyleSelect').value;
+                const buildStyle = SUBTITLE_STYLES[styleKey] || SUBTITLE_STYLES.vertice;
                 const filterParts = [];
                 for (let i = 0; i < segments.length; i++) {
                     const seg = segments[i];
@@ -934,9 +978,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                         "drawtext=textfile=" + fname +
                         ":fontfile=burn_font.ttf" +
                         ":expansion=none" +
-                        ":fontsize=" + fontSize + ":fontcolor=0xEAFFF2" +
-                        ":bordercolor=0x00F260@0.65:borderw=1.6" +
-                        ":box=1:boxcolor=0x0B1119@0.8:boxborderw=16" +
+                        ":fontsize=" + fontSize +
+                        buildStyle() +
                         ":line_spacing=10" +
                         ":x=(w-text_w)/2:y=h-text_h-48" +
                         ":enable='between(t," + start + "," + end + ")'"
