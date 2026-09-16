@@ -6,11 +6,18 @@
     <title>VÉRTICE — Consola de Voz</title>
     <style>
 :root{--bg:#05080d;--panel:#0b1119;--panel2:#0f1722;--line:rgba(255,255,255,.09);--text:#f4f7fb;--muted:#8e9aaa;--accent:#00f260;--accent2:#00b7ff;--danger:#ff5266;--warning:#ffc857;--shadow:0 22px 60px rgba(0,0,0,.42)}
-*{margin:0;padding:0;box-sizing:border-box}html{background:var(--bg)}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 15% 0%,rgba(0,242,96,.08),transparent 28%),radial-gradient(circle at 90% 15%,rgba(0,183,255,.09),transparent 30%),linear-gradient(180deg,#05080d,#070b11 55%,#04070b);color:var(--text);min-height:100vh;padding:18px;overflow-x:hidden}
+*{margin:0;padding:0;box-sizing:border-box}html{background:var(--bg)}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 15% 0%,rgba(0,242,96,.08),transparent 28%),radial-gradient(circle at 90% 15%,rgba(0,183,255,.09),transparent 30%),linear-gradient(180deg,#05080d,#070b11 55%,#04070b);color:var(--text);min-height:100vh;padding:18px;padding-bottom:calc(86px + env(safe-area-inset-bottom));overflow-x:hidden}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(4,1fr);background:rgba(8,13,19,.95);backdrop-filter:blur(18px);border-top:1px solid var(--line);box-shadow:0 -14px 38px rgba(0,0,0,.38);padding:7px 4px calc(7px + env(safe-area-inset-bottom))}
+.bottom-nav-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 2px;border:0;background:transparent;color:#8490a0;font-weight:800;cursor:pointer;border-radius:12px;transition:.2s}
+.bottom-nav-btn .bn-icon{font-size:1.28rem;line-height:1}
+.bottom-nav-btn .bn-label{font-size:.58rem;letter-spacing:.05em}
+.bottom-nav-btn.active{color:#8dffbc;background:rgba(0,242,96,.09)}
+.bottom-nav-btn.active .bn-icon{filter:drop-shadow(0 0 6px rgba(0,242,96,.5))}
+.bottom-nav-btn:active{transform:scale(.93)}
+.export-empty-hint{padding:14px;text-align:center;color:var(--muted);font-size:.78rem;border:1px dashed var(--line);border-radius:14px}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(to bottom,black,transparent 80%);z-index:0}.container{max-width:1240px;margin:auto;position:relative;z-index:1}
 header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:0 0 18px;padding:18px 22px;background:rgba(9,14,21,.78);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);box-shadow:var(--shadow)}
 .brand{display:flex;align-items:center;gap:14px}.brand-mark{width:48px;height:48px;border:1px solid rgba(0,242,96,.35);border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,rgba(0,242,96,.16),rgba(0,183,255,.08));box-shadow:inset 0 0 24px rgba(0,242,96,.06)}h1{font-size:1.65rem;letter-spacing:.12em;font-weight:800;margin:0;background:linear-gradient(90deg,#fff,#b7ffd7);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.subtitle{font-size:.72rem;color:var(--muted);letter-spacing:.16em;margin-top:4px}.top-status{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.status-chip{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:#b9c3cf;border:1px solid var(--line);background:rgba(255,255,255,.035);padding:8px 11px;border-radius:999px}.status-chip.live{color:#8dffbc;border-color:rgba(0,242,96,.25)}
-.mode-selector{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:6px;background:rgba(8,13,19,.9);border:1px solid var(--line);border-radius:15px;margin-bottom:18px;box-shadow:0 12px 35px rgba(0,0,0,.24)}.mode-btn{padding:13px 16px;border:0;border-radius:10px;cursor:pointer;background:transparent;color:#8490a0;font-size:.82rem;font-weight:800;letter-spacing:.1em;transition:.25s}.mode-btn.active{color:#06110a;background:linear-gradient(90deg,#00f260,#6dffb0);box-shadow:0 7px 24px rgba(0,242,96,.18)}.mode-btn:hover:not(.active){color:#fff;background:rgba(255,255,255,.045)}
 .panel{display:none}.panel.active{display:block;animation:panelIn .35s ease}@keyframes panelIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .panel{background:rgba(7,11,17,.58);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}.section{margin-bottom:12px;padding:18px;background:linear-gradient(145deg,rgba(18,26,37,.9),rgba(10,16,24,.82));border:1px solid var(--line);border-radius:15px;position:relative;overflow:hidden}.section:after{content:"";position:absolute;left:0;top:0;width:2px;height:100%;background:linear-gradient(180deg,var(--accent),transparent)}.section h2{margin-bottom:16px;font-size:.78rem;color:#aab6c5;letter-spacing:.13em;text-transform:uppercase}.section h2:first-letter{color:var(--accent)}
 .control-group{margin-bottom:17px}.control-group:last-child{margin-bottom:0}label{display:flex;justify-content:space-between;gap:10px;margin-bottom:9px;font-size:.78rem;color:#b9c2cf}input[type=range]{width:100%;height:4px;border-radius:5px;background:#202a36;outline:0;-webkit-appearance:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#eafff2;border:3px solid var(--accent);box-shadow:0 0 0 4px rgba(0,242,96,.1);cursor:pointer}input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#eafff2;border:3px solid var(--accent);cursor:pointer}
@@ -18,9 +25,9 @@ header{display:flex;align-items:center;justify-content:space-between;gap:20px;ma
 select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important;background:#111a25!important}select option{background:#0d141d;color:#fff}.file-input-wrapper{position:relative;display:block;margin:8px 0}.file-input-wrapper input[type=file]{position:absolute;left:-9999px}.file-input-label{display:block;padding:28px 18px;background:repeating-linear-gradient(135deg,rgba(255,255,255,.025),rgba(255,255,255,.025) 8px,transparent 8px,transparent 16px);border:1px dashed #344252;border-radius:13px;cursor:pointer;text-align:center;color:#aeb9c7;font-size:.82rem;transition:.25s}.file-input-label:hover{border-color:rgba(0,242,96,.55);background-color:rgba(0,242,96,.035);color:#fff}
 .status{padding:11px 13px;border-radius:9px;margin:12px 0;font-size:.76rem;text-align:left;border:1px solid var(--line)}.status.info{background:rgba(0,183,255,.07);border-color:rgba(0,183,255,.22);color:#a9dfff}.status.success{background:rgba(0,242,96,.07);border-color:rgba(0,242,96,.22);color:#aaffc9}.status.error{background:rgba(255,82,102,.07);border-color:rgba(255,82,102,.22);color:#ffb2bd}.status.processing{background:rgba(255,200,87,.07);border-color:rgba(255,200,87,.25);color:#ffe2a1;animation:pulse 1.5s infinite}@keyframes pulse{50%{opacity:.58}}
 .visualizer{width:100%;height:175px;background:#05090e;border:1px solid #18212d;border-radius:11px;margin:10px 0;display:block}.note-display{font-size:2.2rem;letter-spacing:.05em;text-align:center;padding:20px;background:radial-gradient(circle,rgba(0,242,96,.12),transparent 68%),#060b10;border:1px solid rgba(0,242,96,.17);border-radius:13px;margin:12px 0 16px;font-weight:800;color:#eafff1}.warning{background:rgba(255,200,87,.055);border:1px solid rgba(255,200,87,.2);padding:11px 14px;border-radius:9px;margin:12px 0 2px;text-align:center;color:#d9c89e;font-size:.72rem}.progress-bar{width:100%;height:8px;background:#1a232e;border-radius:99px;overflow:hidden;margin:14px 0}.upload-progress{margin:13px 0 0;padding:14px 15px;border:1px solid rgba(0,242,96,.18);border-radius:12px;background:rgba(0,242,96,.035);box-shadow:inset 0 0 24px rgba(0,242,96,.025)}.upload-progress-head{display:flex;justify-content:space-between;align-items:center;gap:12px;color:#aeb9c7;font-size:.68rem;letter-spacing:.1em}.upload-progress-head strong{color:#8dffbc;font-size:.78rem}.upload-progress-track{height:7px;background:#18212b;border-radius:99px;overflow:hidden;margin:10px 0 7px}.upload-progress-fill{height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#00f260,#00b7ff);box-shadow:0 0 12px rgba(0,242,96,.32);transition:width .18s ease}.upload-progress-detail{font-size:.66rem;color:#718093}.loading-pulse{animation:loadingPulse 1.1s ease-in-out infinite}@keyframes loadingPulse{50%{opacity:.45}}.process-status-line{display:flex;align-items:center;gap:8px}.spinner{width:13px;height:13px;border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);border-radius:50%;display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.progress-fill{height:100%;background:linear-gradient(90deg,#00f260,#00b7ff);width:0%;transition:width .3s;display:flex;align-items:center;justify-content:center;font-size:0}.hidden{display:none!important}video{max-width:100%;width:100%;border-radius:11px;background:#020406;margin:8px 0;border:1px solid var(--line)}.subtitle-style-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}.subtitle-style-card{border:1.5px solid var(--line);border-radius:12px;padding:6px;cursor:pointer;background:rgba(255,255,255,.02);transition:.2s;text-align:center}.subtitle-style-card:hover{border-color:rgba(0,242,96,.35)}.subtitle-style-card.active{border-color:var(--accent);background:rgba(0,242,96,.06);box-shadow:0 0 0 1px rgba(0,242,96,.25),0 6px 18px rgba(0,242,96,.1)}.subtitle-style-preview{height:64px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a4658,#1c2530 45%,#2b3644);overflow:hidden}.subtitle-style-name{display:block;margin-top:7px;font-size:.66rem;letter-spacing:.04em;color:#b9c2cf;font-weight:700}.subtitle-style-card.active .subtitle-style-name{color:#8dffbc}
-#livePanel,#videoPanel{display:none}#livePanel.active,#videoPanel.active{display:block}.panel>.section:last-child{margin-bottom:0}
+.panel>.section:last-child{margin-bottom:0}
 @media(min-width:850px){#livePanel.active{display:grid;grid-template-columns:1.05fr .95fr;gap:12px}.panel{padding:18px}#livePanel.active>.section:nth-child(1){grid-column:1}.panel>.section:nth-child(4),.panel>.section:nth-child(5){grid-column:1/-1}.panel>.section:nth-child(3){grid-column:2;grid-row:1 / span 2}}
-@media(max-width:680px){body{padding:10px}.top-status{display:none}header{padding:14px 15px}.brand-mark{width:42px;height:42px}.brand-mark{font-size:.9rem}h1{font-size:1.3rem}.subtitle{font-size:.58rem}.mode-btn{font-size:.68rem;padding:12px 8px}.panel{padding:9px;border-radius:16px}.section{padding:15px}.note-display{font-size:1.65rem}.visualizer{height:135px}}
+@media(max-width:680px){body{padding:10px;padding-bottom:calc(84px + env(safe-area-inset-bottom))}.top-status{display:none}header{padding:14px 15px}.brand-mark{width:42px;height:42px}.brand-mark{font-size:.9rem}h1{font-size:1.3rem}.subtitle{font-size:.58rem}.panel{padding:9px;border-radius:16px}.section{padding:15px}.note-display{font-size:1.65rem}.visualizer{height:135px}}
 .pro-footer{display:flex;justify-content:space-between;gap:10px;padding:10px 4px;color:#536171;font-size:.58rem;letter-spacing:.14em;text-transform:uppercase}.pro-footer span:nth-child(2){color:#6f7f91}@media(max-width:680px){.pro-footer{font-size:.5rem}}
 </style>
 </head>
@@ -34,10 +41,20 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             <div class="top-status"><span class="status-chip live">● SISTEMA LOCAL</span><span class="status-chip">VC-1 / 01</span></div>
         </header>
 
-        <div class="mode-selector">
-            <button class="mode-btn active" onclick="switchMode('live')">🎤 MODO EN VIVO</button>
-            <button class="mode-btn" onclick="switchMode('video')">🎬 PROCESAR VIDEO</button>
-        </div>
+        <nav class="bottom-nav">
+            <button class="bottom-nav-btn active" data-screen="live" onclick="switchMode('live')">
+                <span class="bn-icon">🎙️</span><span class="bn-label">EN VIVO</span>
+            </button>
+            <button class="bottom-nav-btn" data-screen="edit" onclick="switchMode('edit')">
+                <span class="bn-icon">🎬</span><span class="bn-label">EDITAR</span>
+            </button>
+            <button class="bottom-nav-btn" data-screen="subtitles" onclick="switchMode('subtitles')">
+                <span class="bn-icon">📝</span><span class="bn-label">SUBTÍTULOS</span>
+            </button>
+            <button class="bottom-nav-btn" data-screen="export" onclick="switchMode('export')">
+                <span class="bn-icon">💾</span><span class="bn-label">EXPORTAR</span>
+            </button>
+        </nav>
 
         <!-- MODO EN VIVO -->
         <div id="livePanel" class="panel active">
@@ -99,8 +116,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             <div class="warning">⚠️ USA AUDÍFONOS PARA EVITAR RETROALIMENTACIÓN</div>
         </div>
 
-        <!-- MODO VIDEO -->
-        <div id="videoPanel" class="panel">
+        <!-- EDITAR -->
+        <div id="editPanel" class="panel">
             <div class="section">
                 <h2>🎬 SUBIR VIDEO</h2>
                 <div class="file-input-wrapper">
@@ -149,12 +166,12 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="progress-bar hidden" id="progressBar">
                     <div class="progress-fill" id="progressFill">0%</div>
                 </div>
+                <div class="warning" style="margin-top:9px;">Cuando termine, encontrarás el video procesado en la pestaña 💾 EXPORTAR.</div>
             </div>
-            <div class="section">
-                <h2>💾 RESULTADO</h2>
-                <video id="outputVideo" controls class="hidden"></video>
-                <button class="btn btn-secondary hidden" id="downloadVideoBtn" onclick="downloadProcessedVideo()">⬇ DESCARGAR VIDEO PROCESADO</button>
-            </div>
+        </div>
+
+        <!-- SUBTÍTULOS -->
+        <div id="subtitlesPanel" class="panel">
             <div class="section">
                 <h2>📝 GENERADOR DE SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
                 <div class="control-group">
@@ -180,57 +197,76 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="progress-bar hidden" id="subsProgressBar">
                     <div class="progress-fill" id="subsProgressFill">0%</div>
                 </div>
-                <div id="subsDownloads" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;"></div>
                 <div class="warning" style="margin-top:9px;">
-                    Usa el modelo Whisper "small" (mejor precisión, ~250MB de descarga la primera vez) y corre 100% en tu dispositivo. Es más lento que un modelo chico, sobre todo en celulares de gama media — dale tiempo. La calidad sigue dependiendo de la claridad del audio; nombres propios o acentos muy fuertes aún pueden generar errores ocasionales.
+                    Usa el modelo Whisper "small" (mejor precisión, ~250MB de descarga la primera vez) y corre 100% en tu dispositivo. Es más lento que un modelo chico, sobre todo en celulares de gama media — dale tiempo. La calidad sigue dependiendo de la claridad del audio; nombres propios o acentos muy fuertes aún pueden generar errores ocasionales. Los archivos .srt aparecen en 💾 EXPORTAR.
                 </div>
-                <div id="burnSection" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
-                    <label>Quemar subtítulos en el video</label>
-                    <select id="burnLangSelect" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
-                    <label style="margin-top:14px;">Estilo del subtítulo</label>
-                    <div class="subtitle-style-grid" id="subtitleStyleGrid">
-                        <div class="subtitle-style-card active" data-style="vertice" onclick="selectSubtitleStyle('vertice')">
-                            <div class="subtitle-style-preview">
-                                <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#eafff2;background:rgba(11,17,25,.85);padding:4px 10px;border-radius:5px;-webkit-text-stroke:.6px #00f260;">Aa</span>
-                            </div>
-                            <span class="subtitle-style-name">VÉRTICE</span>
+            </div>
+            <div id="burnSection" class="section hidden">
+                <h2>📌 PEGAR SUBTÍTULOS EN EL VIDEO</h2>
+                <label>Idioma</label>
+                <select id="burnLangSelect" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
+                <label style="margin-top:14px;">Estilo del subtítulo</label>
+                <div class="subtitle-style-grid" id="subtitleStyleGrid">
+                    <div class="subtitle-style-card active" data-style="vertice" onclick="selectSubtitleStyle('vertice')">
+                        <div class="subtitle-style-preview">
+                            <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#eafff2;background:rgba(11,17,25,.85);padding:4px 10px;border-radius:5px;-webkit-text-stroke:.6px #00f260;">Aa</span>
                         </div>
-                        <div class="subtitle-style-card" data-style="clasico" onclick="selectSubtitleStyle('clasico')">
-                            <div class="subtitle-style-preview">
-                                <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#fff;-webkit-text-stroke:1.2px #000;text-shadow:2px 2px 2px rgba(0,0,0,.8);">Aa</span>
-                            </div>
-                            <span class="subtitle-style-name">CLÁSICO</span>
-                        </div>
-                        <div class="subtitle-style-card" data-style="netflix" onclick="selectSubtitleStyle('netflix')">
-                            <div class="subtitle-style-preview">
-                                <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#fff;background:rgba(0,0,0,.6);padding:4px 10px;border-radius:4px;">Aa</span>
-                            </div>
-                            <span class="subtitle-style-name">NETFLIX</span>
-                        </div>
-                        <div class="subtitle-style-card" data-style="amarillo" onclick="selectSubtitleStyle('amarillo')">
-                            <div class="subtitle-style-preview">
-                                <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#ffe034;-webkit-text-stroke:1.2px #000;">Aa</span>
-                            </div>
-                            <span class="subtitle-style-name">AMARILLO CINE</span>
-                        </div>
-                        <div class="subtitle-style-card" data-style="impacto" onclick="selectSubtitleStyle('impacto')" style="grid-column:1 / -1;">
-                            <div class="subtitle-style-preview">
-                                <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#fff;-webkit-text-stroke:1.8px #000;">Aa</span>
-                            </div>
-                            <span class="subtitle-style-name">IMPACTO / REDES</span>
-                        </div>
+                        <span class="subtitle-style-name">VÉRTICE</span>
                     </div>
-                    <button class="btn btn-secondary" id="burnSubsBtn" onclick="burnSubtitles()" style="margin-top:10px;">🔥 QUEMAR EN VIDEO</button>
-                    <div id="burnStatus" class="status hidden"></div>
-                    <div class="progress-bar hidden" id="burnProgressBar">
-                        <div class="progress-fill" id="burnProgressFill">0%</div>
+                    <div class="subtitle-style-card" data-style="clasico" onclick="selectSubtitleStyle('clasico')">
+                        <div class="subtitle-style-preview">
+                            <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#fff;-webkit-text-stroke:1.2px #000;text-shadow:2px 2px 2px rgba(0,0,0,.8);">Aa</span>
+                        </div>
+                        <span class="subtitle-style-name">CLÁSICO</span>
                     </div>
-                    <video id="burnOutputVideo" controls class="hidden" style="margin-top:10px;"></video>
-                    <button class="btn btn-secondary hidden" id="downloadBurnBtn" style="margin-top:8px;">⬇ DESCARGAR VIDEO CON SUBTÍTULOS</button>
-                    <div class="warning" style="margin-top:9px;">
-                        Esto vuelve a codificar el video (no solo el audio), así que tarda más. Se aplica sobre el video original subido, con el audio sin cambios.
+                    <div class="subtitle-style-card" data-style="netflix" onclick="selectSubtitleStyle('netflix')">
+                        <div class="subtitle-style-preview">
+                            <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#fff;background:rgba(0,0,0,.6);padding:4px 10px;border-radius:4px;">Aa</span>
+                        </div>
+                        <span class="subtitle-style-name">NETFLIX</span>
+                    </div>
+                    <div class="subtitle-style-card" data-style="amarillo" onclick="selectSubtitleStyle('amarillo')">
+                        <div class="subtitle-style-preview">
+                            <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#ffe034;-webkit-text-stroke:1.2px #000;">Aa</span>
+                        </div>
+                        <span class="subtitle-style-name">AMARILLO CINE</span>
+                    </div>
+                    <div class="subtitle-style-card" data-style="impacto" onclick="selectSubtitleStyle('impacto')" style="grid-column:1 / -1;">
+                        <div class="subtitle-style-preview">
+                            <span style="font-family:Inter,sans-serif;font-weight:800;font-size:1.05rem;color:#fff;-webkit-text-stroke:1.8px #000;">Aa</span>
+                        </div>
+                        <span class="subtitle-style-name">IMPACTO / REDES</span>
                     </div>
                 </div>
+                <button class="btn btn-secondary" id="burnSubsBtn" onclick="burnSubtitles()" style="margin-top:10px;">📌 PEGAR SUBTÍTULOS</button>
+                <div id="burnStatus" class="status hidden"></div>
+                <div class="progress-bar hidden" id="burnProgressBar">
+                    <div class="progress-fill" id="burnProgressFill">0%</div>
+                </div>
+                <div class="warning" style="margin-top:9px;">
+                    Esto vuelve a codificar el video (no solo el audio), así que tarda más. Se aplica sobre el video original subido, con el audio sin cambios. El resultado aparece en 💾 EXPORTAR.
+                </div>
+            </div>
+        </div>
+
+        <!-- EXPORTAR -->
+        <div id="exportPanel" class="panel">
+            <div class="section">
+                <h2>🎬 VIDEO PROCESADO</h2>
+                <video id="outputVideo" controls class="hidden"></video>
+                <button class="btn btn-secondary hidden" id="downloadVideoBtn" onclick="downloadProcessedVideo()">⬇ DESCARGAR VIDEO PROCESADO</button>
+                <div class="export-empty-hint" id="exportVideoEmptyHint">Todavía no procesaste ningún video. Ve a 🎬 EDITAR para empezar.</div>
+            </div>
+            <div class="section">
+                <h2>📝 SUBTÍTULOS (.SRT)</h2>
+                <div id="subsDownloads" style="display:flex;flex-direction:column;gap:8px;"></div>
+                <div class="export-empty-hint" id="exportSubsEmptyHint">Todavía no generaste subtítulos. Ve a 📝 SUBTÍTULOS para crearlos.</div>
+            </div>
+            <div class="section">
+                <h2>📌 VIDEO CON SUBTÍTULOS PEGADOS</h2>
+                <video id="burnOutputVideo" controls class="hidden"></video>
+                <button class="btn btn-secondary hidden" id="downloadBurnBtn" style="margin-top:8px;">⬇ DESCARGAR VIDEO CON SUBTÍTULOS</button>
+                <div class="export-empty-hint" id="exportBurnEmptyHint">Todavía no pegaste subtítulos a ningún video.</div>
             </div>
         </div>
         <div class="pro-footer"><span>VÉRTICE VC-1</span><span>PRO ENGINE · LOCAL DSP</span><span>BUILD 01</span></div>
@@ -1022,7 +1058,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }
                 const filterChain = filterParts.join(',');
 
-                setBurnStatus('QUEMANDO SUBTÍTULOS', 'Recodificando el video (puede tardar varios minutos)…', 30);
+                setBurnStatus('PEGANDO SUBTÍTULOS', 'Recodificando el video (puede tardar varios minutos)…', 30);
                 await engine.exec([
                     '-i', 'burn_input.mp4',
                     '-vf', filterChain,
@@ -1061,7 +1097,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 await engine.deleteFile('burn_output.mp4').catch(() => {});
             } catch (err) {
                 console.error('Error quemando subtítulos:', err);
-                showBurnMessage('error', '❌ No se pudo quemar el subtítulo en el video: ' + (err.message || err));
+                showBurnMessage('error', '❌ No se pudo pegar el subtítulo en el video: ' + (err.message || err));
             } finally {
                 const engine = ffmpeg;
                 if (engine) {
@@ -1155,19 +1191,35 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         }
 
         function switchMode(mode) {
-            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.bottom-nav-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.screen === mode);
+            });
             document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
-            if (mode === 'live') {
-                document.querySelector('.mode-btn:nth-child(1)').classList.add('active');
-                document.getElementById('livePanel').classList.add('active');
-                isLiveMode = true;
-            } else {
-                document.querySelector('.mode-btn:nth-child(2)').classList.add('active');
-                document.getElementById('videoPanel').classList.add('active');
-                isLiveMode = false;
+
+            const panelIds = { live: 'livePanel', edit: 'editPanel', subtitles: 'subtitlesPanel', export: 'exportPanel' };
+            const targetPanel = document.getElementById(panelIds[mode] || 'livePanel');
+            if (targetPanel) targetPanel.classList.add('active');
+
+            isLiveMode = (mode === 'live');
+            if (mode !== 'live') {
                 const st = document.getElementById('processStatus');
                 if (st) st.classList.add('hidden');
             }
+            if (mode === 'export') updateExportEmptyHints();
+        }
+
+        // Muestra/oculta los avisos de "todavía no generaste nada" en la
+        // pestaña EXPORTAR según si ya existe cada tipo de resultado.
+        function updateExportEmptyHints() {
+            const videoHint = document.getElementById('exportVideoEmptyHint');
+            const subsHint = document.getElementById('exportSubsEmptyHint');
+            const burnHint = document.getElementById('exportBurnEmptyHint');
+            const videoReady = !document.getElementById('downloadVideoBtn').classList.contains('hidden');
+            const burnReady = !document.getElementById('downloadBurnBtn').classList.contains('hidden');
+            const subsReady = document.getElementById('subsDownloads').children.length > 0;
+            if (videoHint) videoHint.classList.toggle('hidden', videoReady);
+            if (subsHint) subsHint.classList.toggle('hidden', subsReady);
+            if (burnHint) burnHint.classList.toggle('hidden', burnReady);
         }
 
         async function startLiveMode() {
