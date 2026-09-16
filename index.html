@@ -849,21 +849,60 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 await engine.writeFile('burn_font.ttf', fontBytes.slice());
                 await engine.writeFile('burn_input.mp4', uploadedVideoBytes.slice());
 
+                // Ancho real del video: lo usamos para calcular el tamaño de
+                // letra y dónde partir líneas largas, así el texto nunca se
+                // sale del cuadro. Si la vista previa no cargó por algún
+                // motivo, usamos un ancho típico como respaldo razonable.
+                const previewEl = document.getElementById('videoPreview');
+                const videoWidth = (previewEl && previewEl.videoWidth) ? previewEl.videoWidth : 1280;
+
+                // Tamaño de letra proporcional al ancho del video (no fijo),
+                // para que se vea bien tanto en video vertical angosto como
+                // en horizontal ancho. Recortado a un rango razonable.
+                const fontSize = Math.max(20, Math.min(56, Math.round(videoWidth * 0.045)));
+
+                // Estimación del ancho promedio de un carácter para esta
+                // tipografía y tamaño (~0.58× el fontsize es razonable para
+                // una fuente proporcional tipo Roboto). Con esto calculamos
+                // cuántos caracteres caben por línea dejando margen a los
+                // lados, y partimos el texto en varias líneas si hace falta.
+                const avgCharWidth = fontSize * 0.58;
+                const maxCharsPerLine = Math.max(12, Math.floor((videoWidth * 0.92) / avgCharWidth));
+
+                function wrapSubtitleText(text) {
+                    const words = text.split(/\s+/).filter(Boolean);
+                    const lines = [];
+                    let current = '';
+                    for (const word of words) {
+                        const candidate = current ? current + ' ' + word : word;
+                        if (candidate.length > maxCharsPerLine && current) {
+                            lines.push(current);
+                            current = word;
+                        } else {
+                            current = candidate;
+                        }
+                    }
+                    if (current) lines.push(current);
+                    return lines.join('\n');
+                }
+
                 setBurnStatus('PREPARANDO TEXTOS', 'Escribiendo ' + segments.length + ' líneas de subtítulo…', 15);
                 const filterParts = [];
                 for (let i = 0; i < segments.length; i++) {
                     const seg = segments[i];
                     const fname = 'seg_' + i + '.txt';
                     writtenFiles.push(fname);
-                    await engine.writeFile(fname, new TextEncoder().encode(seg.text));
+                    const wrapped = wrapSubtitleText(seg.text);
+                    await engine.writeFile(fname, new TextEncoder().encode(wrapped));
                     const start = Math.max(0, seg.start).toFixed(2);
                     const end = Math.max(Number(start) + 0.05, seg.end).toFixed(2);
                     filterParts.push(
                         "drawtext=textfile=" + fname +
                         ":fontfile=burn_font.ttf" +
                         ":expansion=none" +
-                        ":fontsize=28:fontcolor=white" +
+                        ":fontsize=" + fontSize + ":fontcolor=white" +
                         ":box=1:boxcolor=black@0.55:boxborderw=10" +
+                        ":line_spacing=4" +
                         ":x=(w-text_w)/2:y=h-text_h-40" +
                         ":enable='between(t," + start + "," + end + ")'"
                     );
