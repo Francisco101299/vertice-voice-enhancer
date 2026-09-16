@@ -182,7 +182,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 </div>
                 <div id="subsDownloads" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;"></div>
                 <div class="warning" style="margin-top:9px;">
-                    Usa un modelo de IA (Whisper) que se descarga la primera vez (decenas de MB) y corre 100% en tu dispositivo. La calidad depende del modelo y de la claridad del audio; nombres propios o acentos fuertes pueden generar errores.
+                    Usa el modelo Whisper "small" (mejor precisión, ~250MB de descarga la primera vez) y corre 100% en tu dispositivo. Es más lento que un modelo chico, sobre todo en celulares de gama media — dale tiempo. La calidad sigue dependiendo de la claridad del audio; nombres propios o acentos muy fuertes aún pueden generar errores ocasionales.
                 </div>
                 <div id="burnSection" class="hidden" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
                     <label>Quemar subtítulos en el video</label>
@@ -416,7 +416,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         //
         // API verificada (no inventada):
         //   import { pipeline } from '@huggingface/transformers';
-        //   const asr = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base');
+        //   const asr = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small');
         //   const out = await asr(audioFloat32Array, {
         //       chunk_length_s: 30, stride_length_s: 5, return_timestamps: true,
         //       language: 'spanish', task: 'transcribe' // o 'translate' (SOLO hacia inglés)
@@ -466,7 +466,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             async function getWhisper(id) {
                 if (whisperPipeline) return whisperPipeline;
                 const pipelineFn = await getPipelineFn();
-                whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-base', {
+                whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
                     progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
                 });
                 return whisperPipeline;
@@ -578,7 +578,10 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 const id = ++subtitleMsgId;
                 // Margen amplio: descargar Whisper + transcribir + traducir
                 // varios idiomas puede tardar varios minutos en un celular.
-                const timeoutMs = 15 * 60 * 1000;
+                // whisper-small es más lento que whisper-base, y si se piden
+                // varios idiomas se suman más pasadas (traducción incluida).
+                // Damos más margen antes de considerarlo "colgado".
+                const timeoutMs = 25 * 60 * 1000;
                 const timeout = setTimeout(() => {
                     cleanup();
                     reject(new Error('La generación de subtítulos tardó demasiado (tiempo límite alcanzado).'));
