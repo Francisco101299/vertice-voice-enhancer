@@ -27,6 +27,12 @@
 .edit-segment-row{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:9px}
 .edit-segment-time{font-size:.66rem;color:var(--muted);margin-bottom:6px;letter-spacing:.03em}
 .edit-segment-text{width:100%;background:#0a0e14;color:var(--text);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:8px;font-family:inherit;font-size:.85rem;resize:vertical}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chip-option{position:relative;cursor:pointer}
+.chip-option input{position:absolute;opacity:0;width:0;height:0}
+.chip-option span{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:9px 14px;border-radius:999px;border:1.5px solid var(--line);background:rgba(255,255,255,.02);font-weight:700;font-size:.72rem;letter-spacing:.02em;color:#b9c2cf;transition:.2s}
+.chip-option input:checked+span{border-color:var(--accent);background:rgba(0,242,96,.1);color:#8dffbc;box-shadow:0 0 0 1px rgba(0,242,96,.2)}
+.chip-option.flag span{font-size:1.5rem;padding:8px 13px}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(to bottom,black,transparent 80%);z-index:0}.container{max-width:1240px;margin:auto;position:relative;z-index:1}
 header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:0 0 18px;padding:18px 22px;background:rgba(9,14,21,.78);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);box-shadow:var(--shadow)}
 .brand{display:flex;align-items:center;gap:14px}.brand-mark{width:48px;height:48px;border:1px solid rgba(0,242,96,.35);border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,rgba(0,242,96,.16),rgba(0,183,255,.08));box-shadow:inset 0 0 24px rgba(0,242,96,.06)}h1{font-size:1.65rem;letter-spacing:.12em;font-weight:800;margin:0;background:linear-gradient(90deg,#fff,#b7ffd7);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.subtitle{font-size:.72rem;color:var(--muted);letter-spacing:.16em;margin-top:4px}.top-status{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.status-chip{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:#b9c3cf;border:1px solid var(--line);background:rgba(255,255,255,.035);padding:8px 11px;border-radius:999px}.status-chip.live{color:#8dffbc;border-color:rgba(0,242,96,.25)}
@@ -200,36 +206,48 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         <!-- SUBTÍTULOS -->
         <div id="subtitlesPanel" class="panel">
             <div class="section">
-                <h2>📝 GENERADOR DE SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
+                <h2>📝 SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
                 <div class="control-group">
-                    <label>Modelo de IA</label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="radio" name="whisperModelTier" value="Xenova/whisper-tiny" style="width:18px;height:18px;"> Rápido (~40MB, menos preciso, usa poca RAM)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="radio" name="whisperModelTier" value="Xenova/whisper-base" checked style="width:18px;height:18px;"> Equilibrado (~75MB, recomendado)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="radio" name="whisperModelTier" value="Xenova/whisper-small" style="width:18px;height:18px;"> Preciso (~250MB, más lento, más RAM — riesgo de cierre en celulares con poca memoria)
-                    </label>
+                    <label>Modelo</label>
+                    <div class="chip-row">
+                        <label class="chip-option">
+                            <input type="radio" name="whisperModelTier" value="Xenova/whisper-tiny">
+                            <span>⚡ Rápido</span>
+                        </label>
+                        <label class="chip-option">
+                            <input type="radio" name="whisperModelTier" value="Xenova/whisper-base" checked>
+                            <span>⚖️ Equilibrado</span>
+                        </label>
+                        <label class="chip-option">
+                            <input type="radio" name="whisperModelTier" value="Xenova/whisper-small">
+                            <span>🎯 Preciso</span>
+                        </label>
+                    </div>
                 </div>
                 <div class="control-group">
-                    <label>Idiomas de salida</label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="checkbox" class="subtitleLangCheckbox" value="es" checked style="width:18px;height:18px;"> Español (original)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="checkbox" class="subtitleLangCheckbox" value="en" style="width:18px;height:18px;"> Inglés (traducido)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="checkbox" class="subtitleLangCheckbox" value="fr" style="width:18px;height:18px;"> Francés (traducido)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="checkbox" class="subtitleLangCheckbox" value="pt" style="width:18px;height:18px;"> Portugués (traducido)
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
-                        <input type="checkbox" class="subtitleLangCheckbox" value="it" style="width:18px;height:18px;"> Italiano (traducido)
-                    </label>
+                    <label>Idiomas</label>
+                    <div class="chip-row">
+                        <label class="chip-option flag">
+                            <input type="checkbox" class="subtitleLangCheckbox" value="es" checked>
+                            <span>🇪🇸</span>
+                        </label>
+                        <label class="chip-option flag">
+                            <input type="checkbox" class="subtitleLangCheckbox" value="en">
+                            <span>🇬🇧</span>
+                        </label>
+                        <label class="chip-option flag">
+                            <input type="checkbox" class="subtitleLangCheckbox" value="fr">
+                            <span>🇫🇷</span>
+                        </label>
+                        <label class="chip-option flag">
+                            <input type="checkbox" class="subtitleLangCheckbox" value="pt">
+                            <span>🇵🇹</span>
+                        </label>
+                        <label class="chip-option flag">
+                            <input type="checkbox" class="subtitleLangCheckbox" value="it">
+                            <span>🇮🇹</span>
+                        </label>
+                    </div>
                 </div>
                 <button class="btn btn-primary" id="generateSubsBtn" onclick="generateSubtitles()" disabled>GENERAR SUBTÍTULOS</button>
                 <button class="btn btn-secondary hidden" id="cancelSubsBtn" onclick="cancelSubtitleGeneration()" style="margin-top:8px;">❌ CANCELAR</button>
@@ -239,7 +257,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     <div class="progress-fill" id="subsProgressFill">0%</div>
                 </div>
                 <div class="warning" style="margin-top:9px;">
-                    Corre 100% en tu dispositivo con Whisper (IA). Si tu celular es de gama media/baja o ya tuviste una pantalla de "se cerró la página" antes, usa "Rápido" o "Equilibrado" — "Preciso" puede agotar la memoria disponible en dispositivos con poca RAM. La calidad también depende de la claridad del audio; nombres propios o acentos muy fuertes pueden generar errores ocasionales sin importar el modelo. Los archivos .srt aparecen en 💾 EXPORTAR.
+                    ⚠️ "Preciso" puede agotar la memoria en celulares con poca RAM.
                 </div>
             </div>
             <div id="editSubsSection" class="section hidden">
@@ -248,7 +266,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <select id="editLangSelect" onchange="renderEditableSegments()" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
                 <div id="editSegmentsList" style="max-height:360px;overflow-y:auto;margin-top:12px;"></div>
                 <div class="warning" style="margin-top:9px;">
-                    Corrige aquí las líneas que Whisper transcribió mal (nombres, términos técnicos, etc.). Los cambios se guardan automáticamente y se usan tanto al pegar subtítulos como al volver a descargar el .srt de este idioma.
+                    ✏️ Los cambios se guardan solos y se usan en .srt y al pegar.
                 </div>
             </div>
             <div id="burnSection" class="section hidden">
@@ -294,7 +312,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     <div class="progress-fill" id="burnProgressFill">0%</div>
                 </div>
                 <div class="warning" style="margin-top:9px;">
-                    Esto vuelve a codificar el video (no solo el audio), así que tarda más. Se aplica sobre el video original subido, con el audio sin cambios. El resultado aparece en 💾 EXPORTAR.
+                    ⏳ Recodifica el video completo, tarda más.
                 </div>
             </div>
         </div>
