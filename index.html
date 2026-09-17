@@ -15,6 +15,18 @@
 .bottom-nav-btn.active .bn-icon{filter:drop-shadow(0 0 6px rgba(0,242,96,.5))}
 .bottom-nav-btn:active{transform:scale(.93)}
 .export-empty-hint{padding:14px;text-align:center;color:var(--muted);font-size:.78rem;border:1px dashed var(--line);border-radius:14px}
+.filmstrip-container{position:relative;height:56px;background:#05080d;border-radius:8px;overflow-x:auto;overflow-y:hidden;margin-top:10px;border:1px solid var(--line);white-space:nowrap;-webkit-overflow-scrolling:touch}
+.filmstrip-track{display:inline-flex;height:100%}
+.filmstrip-track img{height:56px;width:auto;display:block;flex-shrink:0;border-right:1px solid rgba(0,0,0,.35)}
+.filmstrip-playhead{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);box-shadow:0 0 6px rgba(0,242,96,.7);pointer-events:none;left:0}
+.icon-toolbar{display:flex;justify-content:space-around;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.icon-tool-btn{display:flex;flex-direction:column;align-items:center;gap:4px;background:transparent;border:0;color:#b9c2cf;font-weight:700;cursor:pointer;padding:6px 12px;border-radius:10px;transition:.2s}
+.icon-tool-btn .it-icon{font-size:1.3rem;line-height:1}
+.icon-tool-btn .it-label{font-size:.6rem;letter-spacing:.04em}
+.icon-tool-btn:active{background:rgba(0,242,96,.09);color:#8dffbc}
+.edit-segment-row{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:9px}
+.edit-segment-time{font-size:.66rem;color:var(--muted);margin-bottom:6px;letter-spacing:.03em}
+.edit-segment-text{width:100%;background:#0a0e14;color:var(--text);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:8px;font-family:inherit;font-size:.85rem;resize:vertical}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(to bottom,black,transparent 80%);z-index:0}.container{max-width:1240px;margin:auto;position:relative;z-index:1}
 header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:0 0 18px;padding:18px 22px;background:rgba(9,14,21,.78);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(18px);box-shadow:var(--shadow)}
 .brand{display:flex;align-items:center;gap:14px}.brand-mark{width:48px;height:48px;border:1px solid rgba(0,242,96,.35);border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,rgba(0,242,96,.16),rgba(0,183,255,.08));box-shadow:inset 0 0 24px rgba(0,242,96,.06)}h1{font-size:1.65rem;letter-spacing:.12em;font-weight:800;margin:0;background:linear-gradient(90deg,#fff,#b7ffd7);-webkit-background-clip:text;-webkit-text-fill-color:transparent}.subtitle{font-size:.72rem;color:var(--muted);letter-spacing:.16em;margin-top:4px}.top-status{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.status-chip{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:#b9c3cf;border:1px solid var(--line);background:rgba(255,255,255,.035);padding:8px 11px;border-radius:999px}.status-chip.live{color:#8dffbc;border-color:rgba(0,242,96,.25)}
@@ -137,7 +149,26 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 </div>
             </div>
             <div class="section">
-                <h2>🎛️ CONFIGURAR PROCESAMIENTO</h2>
+                <h2>🎥 VISTA PREVIA</h2>
+                <video id="videoPreview" controls class="hidden"></video>
+                <div id="filmstripContainer" class="filmstrip-container hidden">
+                    <div id="filmstripTrack" class="filmstrip-track"></div>
+                    <div id="filmstripPlayhead" class="filmstrip-playhead"></div>
+                </div>
+                <div class="icon-toolbar">
+                    <button class="icon-tool-btn" onclick="toggleAudioTools()">
+                        <span class="it-icon">🎵</span><span class="it-label">AUDIO</span>
+                    </button>
+                    <button class="icon-tool-btn" onclick="switchMode('subtitles')">
+                        <span class="it-icon">📝</span><span class="it-label">SUBTÍTULOS</span>
+                    </button>
+                    <button class="icon-tool-btn" onclick="switchMode('export')">
+                        <span class="it-icon">💾</span><span class="it-label">EXPORTAR</span>
+                    </button>
+                </div>
+            </div>
+            <div class="section hidden" id="audioToolsSection">
+                <h2>🎛️ AUDIO</h2>
                 <div class="control-group">
                     <label>Intensidad de autotune: <span id="videoAutotuneValue">70</span>%</label>
                     <input type="range" id="videoAutotune" min="0" max="100" value="70" oninput="updateVideoAutotune(this.value)">
@@ -154,10 +185,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                         Usa una red neuronal (RNNoise) para separar voz de ruido de fondo con más calidad que el filtro estándar. Descarga ~200KB la primera vez (requiere internet) y el proceso tarda más. Si algo falla, VÉRTICE usa automáticamente el modo estándar sin interrumpir el proceso.
                     </div>
                 </div>
-            </div>
-            <div class="section">
-                <h2>🎥 VISTA PREVIA</h2>
-                <video id="videoPreview" controls class="hidden"></video>
             </div>
             <div class="section">
                 <h2>️ PROCESAMIENTO</h2>
@@ -199,6 +226,15 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 </div>
                 <div class="warning" style="margin-top:9px;">
                     Usa el modelo Whisper "small" (mejor precisión, ~250MB de descarga la primera vez) y corre 100% en tu dispositivo. Es más lento que un modelo chico, sobre todo en celulares de gama media — dale tiempo. La calidad sigue dependiendo de la claridad del audio; nombres propios o acentos muy fuertes aún pueden generar errores ocasionales. Los archivos .srt aparecen en 💾 EXPORTAR.
+                </div>
+            </div>
+            <div id="editSubsSection" class="section hidden">
+                <h2>✏️ EDITAR TEXTO</h2>
+                <label>Idioma a editar</label>
+                <select id="editLangSelect" onchange="renderEditableSegments()" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
+                <div id="editSegmentsList" style="max-height:360px;overflow-y:auto;margin-top:12px;"></div>
+                <div class="warning" style="margin-top:9px;">
+                    Corrige aquí las líneas que Whisper transcribió mal (nombres, términos técnicos, etc.). Los cambios se guardan automáticamente y se usan tanto al pegar subtítulos como al volver a descargar el .srt de este idioma.
                 </div>
             </div>
             <div id="burnSection" class="section hidden">
@@ -474,6 +510,95 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             btn.classList.toggle('btn-secondary', !rnnoiseEnabled);
         }
 
+        function toggleAudioTools() {
+            const section = document.getElementById('audioToolsSection');
+            if (section) section.classList.toggle('hidden');
+        }
+
+        // ==========================================================
+        // LÍNEA DE TIEMPO CON MINIATURAS (filmstrip, estilo CapCut)
+        // ==========================================================
+        // Extrae varios fotogramas del video con FFmpeg (en una sola
+        // pasada, con el filtro fps=) y los muestra en una tira desplazable
+        // con un cursor de reproducción sincronizado con el <video>. Si algo
+        // falla, simplemente no se muestra — no bloquea el resto de la app.
+        async function generateFilmstrip() {
+            const container = document.getElementById('filmstripContainer');
+            const track = document.getElementById('filmstripTrack');
+            if (!container || !track || !uploadedVideoBytes) return;
+            track.innerHTML = '';
+            container.classList.add('hidden');
+
+            const filmstripFiles = ['filmstrip_input.mp4'];
+            try {
+                const engine = await initFFmpeg();
+                await engine.writeFile('filmstrip_input.mp4', uploadedVideoBytes.slice());
+
+                // Duración real del video, vía el log de análisis de FFmpeg
+                // (mismo recurso que usamos para el ancho al pegar subtítulos).
+                let duration = null;
+                const durationHandler = ({ message }) => {
+                    const m = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+                    if (m) duration = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+                };
+                engine.on('log', durationHandler);
+                await engine.exec(['-i', 'filmstrip_input.mp4']).catch(() => {});
+                if (!duration || duration <= 0) duration = 10;
+
+                const numThumbs = 10;
+                const interval = Math.max(duration / numThumbs, 0.2);
+                await engine.exec([
+                    '-i', 'filmstrip_input.mp4',
+                    '-vf', 'fps=1/' + interval.toFixed(3) + ',scale=160:-1',
+                    '-vframes', String(numThumbs),
+                    'filmstrip_%03d.jpg'
+                ]);
+
+                for (let i = 1; i <= numThumbs; i++) {
+                    const fname = 'filmstrip_' + String(i).padStart(3, '0') + '.jpg';
+                    try {
+                        const data = await engine.readFile(fname);
+                        const blob = new Blob([data.buffer], { type: 'image/jpeg' });
+                        const url = URL.createObjectURL(blob);
+                        ffmpegRuntimeBlobURLs.push(url);
+                        const img = document.createElement('img');
+                        img.src = url;
+                        track.appendChild(img);
+                        filmstripFiles.push(fname);
+                    } catch (_) {
+                        // Videos muy cortos pueden generar menos fotogramas
+                        // que numThumbs — no es un error, solo paramos ahí.
+                        break;
+                    }
+                }
+
+                if (track.children.length === 0) return; // nada que mostrar
+                container.classList.remove('hidden');
+
+                const video = document.getElementById('videoPreview');
+                const playhead = document.getElementById('filmstripPlayhead');
+                video.addEventListener('timeupdate', () => {
+                    if (!video.duration) return;
+                    const ratio = video.currentTime / video.duration;
+                    playhead.style.left = (ratio * track.scrollWidth) + 'px';
+                });
+
+                function seekFromClientX(clientX) {
+                    const rect = track.getBoundingClientRect();
+                    const x = clientX - rect.left + container.scrollLeft;
+                    const ratio = Math.max(0, Math.min(1, x / track.scrollWidth));
+                    if (video.duration) video.currentTime = ratio * video.duration;
+                }
+                container.addEventListener('click', (e) => seekFromClientX(e.clientX));
+            } catch (err) {
+                console.error('No se pudo generar la línea de tiempo:', err);
+            } finally {
+                for (const f of filmstripFiles) {
+                    await ffmpeg?.deleteFile?.(f).catch(() => {});
+                }
+            }
+        }
+
         // ==========================================================
         // GENERADOR DE SUBTÍTULOS (Whisper + OPUS-MT, vía transformers.js)
         // ==========================================================
@@ -507,6 +632,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         let subtitleWorkerInstance = null;
         let subtitleMsgId = 0;
         let lastSubtitleResult = null; // { es: [...], en: [...], ... } del último GENERAR SUBTÍTULOS
+        const SUBTITLE_LANG_NAMES = { es: 'Español', en: 'Inglés', fr: 'Francés', pt: 'Portugués', it: 'Italiano' };
         let subtitleFontBytes = null; // cache de la tipografía para quemar subtítulos
 
         const SUBTITLE_WORKER_SRC = `
@@ -725,6 +851,53 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             ).join('\n');
         }
 
+        // ==========================================================
+        // EDICIÓN MANUAL DE SUBTÍTULOS YA GENERADOS
+        // ==========================================================
+        // Whisper puede equivocarse (nombres propios, términos técnicos).
+        // Estas dos funciones permiten corregir el texto a mano: se edita
+        // directamente sobre los mismos objetos que ya usan tanto la
+        // descarga del .srt como "PEGAR SUBTÍTULOS" — un solo lugar de
+        // verdad, sin necesidad de sincronizar nada por separado.
+        function renderEditableSegments() {
+            const lang = document.getElementById('editLangSelect').value;
+            const segments = lastSubtitleResult && lastSubtitleResult[lang];
+            const list = document.getElementById('editSegmentsList');
+            list.innerHTML = '';
+            if (!segments || segments.length === 0) return;
+
+            segments.forEach((seg) => {
+                const row = document.createElement('div');
+                row.className = 'edit-segment-row';
+
+                const timeLabel = document.createElement('div');
+                timeLabel.className = 'edit-segment-time';
+                timeLabel.textContent = formatSrtTime(seg.start).slice(0, 8) + ' → ' + formatSrtTime(seg.end).slice(0, 8);
+
+                const textarea = document.createElement('textarea');
+                textarea.className = 'edit-segment-text';
+                textarea.rows = 2;
+                textarea.value = seg.text;
+                textarea.oninput = () => { seg.text = textarea.value; };
+                textarea.onblur = () => refreshSrtDownloadLink(lang);
+
+                row.appendChild(timeLabel);
+                row.appendChild(textarea);
+                list.appendChild(row);
+            });
+        }
+
+        function refreshSrtDownloadLink(lang) {
+            const segments = lastSubtitleResult && lastSubtitleResult[lang];
+            const link = document.getElementById('srtDownload_' + lang);
+            if (!segments || !link) return;
+            const srt = segmentsToSrt(segments);
+            const blob = new Blob([srt], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            ffmpegRuntimeBlobURLs.push(url);
+            link.href = url;
+        }
+
         function setSubsStatus(title, detail, percent = null) {
             const status = document.getElementById('subsStatus');
             if (!status) return;
@@ -799,7 +972,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 setSubsStatus('LISTO', 'Subtítulos generados correctamente.', 100);
                 setTimeout(() => document.getElementById('subsProgressBar').classList.add('hidden'), 900);
 
-                const langNames = { es: 'Español', en: 'Inglés', fr: 'Francés', pt: 'Portugués', it: 'Italiano' };
                 const container = document.getElementById('subsDownloads');
                 container.innerHTML = '';
                 let any = false;
@@ -812,27 +984,34 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     const url = URL.createObjectURL(srtBlob);
                     ffmpegRuntimeBlobURLs.push(url);
                     const a = document.createElement('a');
+                    a.id = 'srtDownload_' + lang;
                     a.href = url;
                     const baseName = (uploadedVideo.name || 'video').replace(/\.[^.]+$/, '');
                     a.download = baseName + '_' + lang + '.srt';
                     a.className = 'btn btn-secondary';
-                    a.textContent = '⬇ DESCARGAR .SRT · ' + (langNames[lang] || lang.toUpperCase());
+                    a.textContent = '⬇ DESCARGAR .SRT · ' + (SUBTITLE_LANG_NAMES[lang] || lang.toUpperCase());
                     container.appendChild(a);
                 }
 
                 if (any) {
-                    showSubsMessage('success', '✓ Subtítulos listos — descárgalos arriba.');
+                    showSubsMessage('success', '✓ Subtítulos listos — descárgalos en 💾 EXPORTAR.');
                     lastSubtitleResult = result;
                     const burnSelect = document.getElementById('burnLangSelect');
+                    const editSelect = document.getElementById('editLangSelect');
                     burnSelect.innerHTML = '';
+                    editSelect.innerHTML = '';
                     for (const lang of langs) {
                         if (!result[lang] || result[lang].length === 0) continue;
-                        const opt = document.createElement('option');
-                        opt.value = lang;
-                        opt.textContent = langNames[lang] || lang.toUpperCase();
-                        burnSelect.appendChild(opt);
+                        const opt1 = document.createElement('option');
+                        opt1.value = lang;
+                        opt1.textContent = SUBTITLE_LANG_NAMES[lang] || lang.toUpperCase();
+                        burnSelect.appendChild(opt1);
+                        const opt2 = opt1.cloneNode(true);
+                        editSelect.appendChild(opt2);
                     }
                     document.getElementById('burnSection').classList.remove('hidden');
+                    document.getElementById('editSubsSection').classList.remove('hidden');
+                    renderEditableSegments();
                 } else {
                     showSubsMessage('error', '❌ No se detectó voz o texto para generar subtítulos.');
                 }
@@ -1438,6 +1617,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     bytesOk = true;
                     updateProcessButtonState();
                     maybeShowCombinedStatus();
+                    generateFilmstrip();
                 } catch (readErr) {
                     console.error(readErr);
                     if (uploadedVideo !== file) return;
