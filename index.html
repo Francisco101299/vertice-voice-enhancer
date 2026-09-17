@@ -220,6 +220,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     </label>
                 </div>
                 <button class="btn btn-primary" id="generateSubsBtn" onclick="generateSubtitles()" disabled>GENERAR SUBTÍTULOS</button>
+                <button class="btn btn-secondary hidden" id="cancelSubsBtn" onclick="cancelSubtitleGeneration()" style="margin-top:8px;">❌ CANCELAR</button>
                 <div id="subsStatus" class="status hidden"></div>
                 <div class="progress-bar hidden" id="subsProgressBar">
                     <div class="progress-fill" id="subsProgressFill">0%</div>
@@ -664,19 +665,35 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 // Mismo modelo, mismos pesos, misma calidad — solo cambia el
                 // hardware que hace el cálculo. WebGPU (la GPU del celular)
                 // suele ser notablemente más rápido que WASM (CPU). Es una
-                // API todavía experimental en navegadores, así que si falla
-                // al cargar (dispositivo/navegador sin soporte, o algún
-                // problema de driver), caemos automáticamente a CPU sin
-                // interrumpir el proceso.
+                // API todavía experimental, y en algunos dispositivos "carga"
+                // pero corre por software (emulado), lo que puede ser MÁS
+                // LENTO que la CPU normal en vez de más rápido — no basta con
+                // detectar errores de carga, hay que medir la velocidad real.
                 try {
                     self.postMessage({ id, type: 'status', message: 'Probando aceleración por GPU (WebGPU)…' });
-                    whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
+                    const candidate = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
                         device: 'webgpu',
                         progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
                     });
-                    self.postMessage({ id, type: 'status', message: 'GPU disponible — usando aceleración por hardware.' });
+
+                    // Prueba de velocidad real con medio segundo de silencio:
+                    // si ni siquiera eso responde en un tiempo razonable, es
+                    // señal de que la GPU de este dispositivo es demasiado
+                    // lenta (o emulada) — mejor usar CPU directamente que
+                    // arriesgar horas de proceso.
+                    self.postMessage({ id, type: 'status', message: 'Verificando velocidad real de la GPU…' });
+                    const dummy = new Float32Array(8000); // 0.5s de silencio a 16kHz
+                    const benchmarkStart = Date.now();
+                    await Promise.race([
+                        candidate(dummy, { language: 'spanish', task: 'transcribe' }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('benchmark timeout')), 12000))
+                    ]);
+                    console.log('Benchmark WebGPU: ' + (Date.now() - benchmarkStart) + 'ms');
+
+                    whisperPipeline = candidate;
+                    self.postMessage({ id, type: 'status', message: 'GPU disponible y suficientemente rápida — usándola.' });
                 } catch (gpuErr) {
-                    self.postMessage({ id, type: 'status', message: 'GPU no disponible en este dispositivo, usando CPU…' });
+                    self.postMessage({ id, type: 'status', message: 'GPU no disponible o demasiado lenta en este dispositivo, usando CPU…' });
                     whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
                         progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
                     });
@@ -777,6 +794,19 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             return subtitleWorkerInstance;
         }
 
+        let activeSubtitleAbort = null; // función para cancelar la generación en curso, si hay una
+
+        function cancelSubtitleGeneration() {
+            if (subtitleWorkerInstance) {
+                try { subtitleWorkerInstance.terminate(); } catch (_) {}
+                subtitleWorkerInstance = null; // se crea uno limpio la próxima vez
+            }
+            if (activeSubtitleAbort) {
+                activeSubtitleAbort(new Error('Generación cancelada por el usuario.'));
+                activeSubtitleAbort = null;
+            }
+        }
+
         function runSubtitleGeneration(monoFloat16k, duration, languages, onStatus) {
             return new Promise((resolve, reject) => {
                 let worker;
@@ -799,6 +829,12 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     reject(new Error('La generación de subtítulos tardó demasiado (tiempo límite alcanzado).'));
                 }, timeoutMs);
 
+                activeSubtitleAbort = (err) => {
+                    clearTimeout(timeout);
+                    cleanup();
+                    reject(err);
+                };
+
                 function handleMessage(e) {
                     if (!e.data || e.data.id !== id) return;
                     if (e.data.type === 'status') {
@@ -811,16 +847,19 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     } else if (e.data.type === 'done') {
                         clearTimeout(timeout);
                         cleanup();
+                        activeSubtitleAbort = null;
                         resolve(e.data.result);
                     } else if (e.data.type === 'error') {
                         clearTimeout(timeout);
                         cleanup();
+                        activeSubtitleAbort = null;
                         reject(new Error(e.data.message || 'Error desconocido generando subtítulos.'));
                     }
                 }
                 function handleWorkerError(e) {
                     clearTimeout(timeout);
                     cleanup();
+                    activeSubtitleAbort = null;
                     reject(new Error('El Worker de subtítulos falló: ' + (e?.message || 'error desconocido')));
                 }
                 function cleanup() {
@@ -945,7 +984,9 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             }
 
             const btn = document.getElementById('generateSubsBtn');
+            const cancelBtn = document.getElementById('cancelSubsBtn');
             btn.disabled = true;
+            cancelBtn.classList.remove('hidden');
             document.getElementById('subsDownloads').innerHTML = '';
 
             try {
@@ -1017,9 +1058,14 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }
             } catch (err) {
                 console.error('Error generando subtítulos:', err);
-                showSubsMessage('error', '❌ No se pudieron generar los subtítulos: ' + (err.message || err));
+                if (err && /cancelada por el usuario/.test(err.message || '')) {
+                    showSubsMessage('info', '⏹ Generación cancelada.');
+                } else {
+                    showSubsMessage('error', '❌ No se pudieron generar los subtítulos: ' + (err.message || err));
+                }
             } finally {
                 btn.disabled = !uploadedVideoBytes;
+                cancelBtn.classList.add('hidden');
             }
         }
 
