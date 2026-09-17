@@ -7,7 +7,7 @@
     <style>
 :root{--bg:#05080d;--panel:#0b1119;--panel2:#0f1722;--line:rgba(255,255,255,.09);--text:#f4f7fb;--muted:#8e9aaa;--accent:#00f260;--accent2:#00b7ff;--danger:#ff5266;--warning:#ffc857;--shadow:0 22px 60px rgba(0,0,0,.42)}
 *{margin:0;padding:0;box-sizing:border-box}html{background:var(--bg)}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 15% 0%,rgba(0,242,96,.08),transparent 28%),radial-gradient(circle at 90% 15%,rgba(0,183,255,.09),transparent 30%),linear-gradient(180deg,#05080d,#070b11 55%,#04070b);color:var(--text);min-height:100vh;padding:18px;padding-bottom:calc(86px + env(safe-area-inset-bottom));overflow-x:hidden}
-.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(4,1fr);background:rgba(8,13,19,.95);backdrop-filter:blur(18px);border-top:1px solid var(--line);box-shadow:0 -14px 38px rgba(0,0,0,.38);padding:7px 4px calc(7px + env(safe-area-inset-bottom))}
+.bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(3,1fr);background:rgba(8,13,19,.95);backdrop-filter:blur(18px);border-top:1px solid var(--line);box-shadow:0 -14px 38px rgba(0,0,0,.38);padding:7px 4px calc(7px + env(safe-area-inset-bottom))}
 .bottom-nav-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 2px;border:0;background:transparent;color:#8490a0;font-weight:800;cursor:pointer;border-radius:12px;transition:.2s}
 .bottom-nav-btn .bn-icon{font-size:1.28rem;line-height:1}
 .bottom-nav-btn .bn-label{font-size:.58rem;letter-spacing:.05em}
@@ -68,9 +68,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             </button>
             <button class="bottom-nav-btn" data-screen="subtitles" onclick="switchMode('subtitles')">
                 <span class="bn-icon">📝</span><span class="bn-label">SUBTÍTULOS</span>
-            </button>
-            <button class="bottom-nav-btn" data-screen="export" onclick="switchMode('export')">
-                <span class="bn-icon">💾</span><span class="bn-label">EXPORTAR</span>
             </button>
         </nav>
 
@@ -168,9 +165,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     <button class="icon-tool-btn" onclick="switchMode('subtitles')">
                         <span class="it-icon">📝</span><span class="it-label">SUBTÍTULOS</span>
                     </button>
-                    <button class="icon-tool-btn" onclick="switchMode('export')">
-                        <span class="it-icon">💾</span><span class="it-label">EXPORTAR</span>
-                    </button>
                 </div>
             </div>
             <div class="section hidden" id="audioToolsSection">
@@ -199,7 +193,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="progress-bar hidden" id="progressBar">
                     <div class="progress-fill" id="progressFill">0%</div>
                 </div>
-                <div class="warning" style="margin-top:9px;">Cuando termine, encontrarás el video procesado en la pestaña 💾 EXPORTAR.</div>
+                <div class="warning" style="margin-top:9px;">Cuando termine, encontrarás el video procesado en la pestaña 📝 SUBTÍTULOS.</div>
             </div>
         </div>
 
@@ -315,10 +309,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     ⏳ Recodifica el video completo, tarda más.
                 </div>
             </div>
-        </div>
-
-        <!-- EXPORTAR -->
-        <div id="exportPanel" class="panel">
             <div class="section">
                 <h2>🎬 VIDEO PROCESADO</h2>
                 <video id="outputVideo" controls class="hidden"></video>
@@ -328,7 +318,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             <div class="section">
                 <h2>📝 SUBTÍTULOS (.SRT)</h2>
                 <div id="subsDownloads" style="display:flex;flex-direction:column;gap:8px;"></div>
-                <div class="export-empty-hint" id="exportSubsEmptyHint">Todavía no generaste subtítulos. Ve a 📝 SUBTÍTULOS para crearlos.</div>
+                <div class="export-empty-hint" id="exportSubsEmptyHint">Todavía no generaste subtítulos.</div>
             </div>
             <div class="section">
                 <h2>📌 VIDEO CON SUBTÍTULOS PEGADOS</h2>
@@ -1096,7 +1086,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 if (any) {
                     const totalSecs = subsTimerStart ? Math.floor((Date.now() - subsTimerStart) / 1000) : null;
                     const timeStr = totalSecs != null ? ' (tardó ' + String(Math.floor(totalSecs / 60)).padStart(2, '0') + ':' + String(totalSecs % 60).padStart(2, '0') + ')' : '';
-                    showSubsMessage('success', '✓ Subtítulos listos' + timeStr + ' — descárgalos en 💾 EXPORTAR.');
+                    showSubsMessage('success', '✓ Subtítulos listos' + timeStr + ' — descárgalos abajo.');
                     lastSubtitleResult = result;
                     const burnSelect = document.getElementById('burnLangSelect');
                     const editSelect = document.getElementById('editLangSelect');
@@ -1500,7 +1490,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             });
             document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
 
-            const panelIds = { live: 'livePanel', edit: 'editPanel', subtitles: 'subtitlesPanel', export: 'exportPanel' };
+            const panelIds = { live: 'livePanel', edit: 'editPanel', subtitles: 'subtitlesPanel' };
             const targetPanel = document.getElementById(panelIds[mode] || 'livePanel');
             if (targetPanel) targetPanel.classList.add('active');
 
@@ -1509,11 +1499,12 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 const st = document.getElementById('processStatus');
                 if (st) st.classList.add('hidden');
             }
-            if (mode === 'export') updateExportEmptyHints();
+            if (mode === 'subtitles') updateExportEmptyHints();
         }
 
-        // Muestra/oculta los avisos de "todavía no generaste nada" en la
-        // pestaña EXPORTAR según si ya existe cada tipo de resultado.
+        // Muestra/oculta los avisos de "todavía no generaste nada" para
+        // cada tipo de resultado (video procesado, .srt, video con
+        // subtítulos), todos ahora dentro de la pestaña SUBTÍTULOS.
         function updateExportEmptyHints() {
             const videoHint = document.getElementById('exportVideoEmptyHint');
             const subsHint = document.getElementById('exportSubsEmptyHint');
