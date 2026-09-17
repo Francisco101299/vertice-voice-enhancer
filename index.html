@@ -1018,6 +1018,78 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             return subsTimerStart ? Math.floor((Date.now() - subsTimerStart) / 1000) : null;
         }
 
+        // ==========================================================
+        // SALTAR SILENCIOS ANTES DE WHISPER (optimización de velocidad)
+        // ==========================================================
+        // Usa el filtro real y estándar de FFmpeg "silencedetect" (no es
+        // nada inventado) para encontrar los tramos sin voz, y arma un
+        // audio más corto uniendo solo los tramos con voz (con un pequeño
+        // margen para no cortar palabras). Esto reduce el tiempo real que
+        // Whisper tiene que procesar, SIN tocar la calidad de las partes
+        // donde sí se habla — el silencio no tiene nada que transcribir.
+        //
+        // Como quitamos silencios, los tiempos que devuelve Whisper quedan
+        // en la línea de tiempo del audio YA RECORTADO, no del video
+        // original — por eso guardamos un "mapa" (trimTimeline) para volver
+        // a calcular el tiempo real de cada subtítulo en el video original.
+        //
+        // Si algo de esto falla (no lo pude probar en un navegador real),
+        // se cae automáticamente al camino de siempre: procesar el audio
+        // completo sin recortar nada.
+        async function detectSpeechSegments(engine, filename, totalDuration) {
+            const silences = [];
+            let pendingStart = null;
+            const handler = ({ message }) => {
+                let m = message.match(/silence_start:\s*(-?[\d.]+)/);
+                if (m) { pendingStart = parseFloat(m[1]); return; }
+                m = message.match(/silence_end:\s*(-?[\d.]+)/);
+                if (m && pendingStart != null) {
+                    silences.push({ start: pendingStart, end: parseFloat(m[1]) });
+                    pendingStart = null;
+                }
+            };
+            engine.on('log', handler);
+            await engine.exec([
+                '-i', filename,
+                '-af', 'silencedetect=noise=-30dB:d=0.6',
+                '-f', 'null', 'silencedetect_null.out'
+            ]);
+            await engine.deleteFile('silencedetect_null.out').catch(() => {});
+
+            if (pendingStart != null) silences.push({ start: pendingStart, end: totalDuration });
+
+            // Invertimos los tramos de silencio para quedarnos con los de voz.
+            const speech = [];
+            let cursor = 0;
+            for (const sil of silences) {
+                if (sil.start > cursor) speech.push({ start: cursor, end: Math.min(sil.start, totalDuration) });
+                cursor = Math.max(cursor, sil.end);
+            }
+            if (cursor < totalDuration) speech.push({ start: cursor, end: totalDuration });
+            return speech.filter(s => s.end - s.start > 0.05);
+        }
+
+        function buildTrimTimeline(speechSegments) {
+            let cursor = 0;
+            return speechSegments.map(seg => {
+                const dur = seg.end - seg.start;
+                const trimmedStart = cursor;
+                cursor += dur;
+                return { origStart: seg.start, origEnd: seg.end, trimmedStart, trimmedEnd: cursor };
+            });
+        }
+
+        function remapTrimmedToOriginal(t, timeline) {
+            if (!timeline || timeline.length === 0) return t;
+            for (const seg of timeline) {
+                if (t <= seg.trimmedEnd) {
+                    const clamped = Math.max(seg.trimmedStart, Math.min(t, seg.trimmedEnd));
+                    return seg.origStart + (clamped - seg.trimmedStart);
+                }
+            }
+            return timeline[timeline.length - 1].origEnd;
+        }
+
         async function generateSubtitles() {
             if (!uploadedVideo || !uploadedVideoBytes) {
                 showSubsMessage('error', '❌ Primero selecciona un video.');
@@ -1037,10 +1109,81 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             document.getElementById('subsDownloads').innerHTML = '';
 
             try {
-                setSubsStatus('PREPARANDO AUDIO', 'Extrayendo audio a 16kHz mono (formato que exige Whisper)…', 5);
+                setSubsStatus('PREPARANDO', 'Analizando el video…', 4);
                 const engine = await initFFmpeg();
                 await engine.writeFile('subs_input.mp4', uploadedVideoBytes.slice());
-                await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', 'subs_audio.pcm']);
+
+                // Duración real del video (mismo recurso que usamos en
+                // otras partes de la app: el log de análisis de FFmpeg).
+                let totalDuration = null;
+                const durationHandler = ({ message }) => {
+                    const m = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+                    if (m) totalDuration = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+                };
+                engine.on('log', durationHandler);
+                await engine.exec(['-i', 'subs_input.mp4']).catch(() => {});
+
+                let trimTimeline = null;
+                let usedTrimming = false;
+
+                if (totalDuration && totalDuration > 8) {
+                    try {
+                        setSubsStatus('ANALIZANDO AUDIO', 'Buscando silencios para acelerar el proceso…', 8);
+                        const speechSegments = await detectSpeechSegments(engine, 'subs_input.mp4', totalDuration);
+                        const totalSpeech = speechSegments.reduce((s, seg) => s + (seg.end - seg.start), 0);
+
+                        // Solo vale la pena si de verdad hay silencio que ahorrar.
+                        if (speechSegments.length > 0 && totalSpeech < totalDuration * 0.85) {
+                            const PAD = 0.25; // margen para no cortar palabras
+                            const padded = speechSegments.map(seg => ({
+                                start: Math.max(0, seg.start - PAD),
+                                end: Math.min(totalDuration, seg.end + PAD)
+                            }));
+                            // Fusionar tramos que quedaron pegados por el margen
+                            const merged = [];
+                            for (const seg of padded) {
+                                const last = merged[merged.length - 1];
+                                if (last && seg.start <= last.end) {
+                                    last.end = Math.max(last.end, seg.end);
+                                } else {
+                                    merged.push({ start: seg.start, end: seg.end });
+                                }
+                            }
+
+                            const keptSecs = merged.reduce((s, seg) => s + (seg.end - seg.start), 0);
+                            const savedSecs = Math.max(0, Math.round(totalDuration - keptSecs));
+                            setSubsStatus('OPTIMIZANDO', 'Se omiten ~' + savedSecs + 's de silencio para ir más rápido…', 12);
+
+                            const filterParts = [];
+                            const labels = [];
+                            merged.forEach((seg, i) => {
+                                filterParts.push('[0:a]atrim=start=' + seg.start.toFixed(3) + ':end=' + seg.end.toFixed(3) + ',asetpts=PTS-STARTPTS[a' + i + ']');
+                                labels.push('[a' + i + ']');
+                            });
+                            filterParts.push(labels.join('') + 'concat=n=' + merged.length + ':v=0:a=1[outa]');
+
+                            await engine.exec([
+                                '-i', 'subs_input.mp4',
+                                '-filter_complex', filterParts.join(';'),
+                                '-map', '[outa]',
+                                '-ac', '1', '-ar', '16000', '-f', 'f32le',
+                                'subs_audio.pcm'
+                            ]);
+
+                            trimTimeline = buildTrimTimeline(merged);
+                            usedTrimming = true;
+                        }
+                    } catch (vadErr) {
+                        console.warn('Salto de silencios no disponible, se usará el audio completo:', vadErr);
+                        usedTrimming = false;
+                        trimTimeline = null;
+                    }
+                }
+
+                if (!usedTrimming) {
+                    setSubsStatus('PREPARANDO AUDIO', 'Extrayendo audio a 16kHz mono (formato que exige Whisper)…', 12);
+                    await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', 'subs_audio.pcm']);
+                }
 
                 const rawPcm = await engine.readFile('subs_audio.pcm');
                 const floatSamples = new Float32Array(Math.floor(rawPcm.length / 4));
@@ -1057,6 +1200,19 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 const result = await runSubtitleGeneration(floatSamples, duration, langs, modelId, (msg) => {
                     setSubsStatus('GENERANDO SUBTÍTULOS', msg, 55);
                 });
+
+                // Si recortamos silencios, los tiempos que devolvió Whisper
+                // están en la línea de tiempo del audio recortado — hay que
+                // volver a ubicarlos en el tiempo real del video original.
+                if (trimTimeline) {
+                    for (const lang of Object.keys(result)) {
+                        result[lang] = result[lang].map(seg => ({
+                            start: remapTrimmedToOriginal(seg.start, trimTimeline),
+                            end: remapTrimmedToOriginal(seg.end, trimTimeline),
+                            text: seg.text
+                        }));
+                    }
+                }
 
                 setSubsStatus('LISTO', 'Subtítulos generados correctamente.', 100);
                 setTimeout(() => document.getElementById('subsProgressBar').classList.add('hidden'), 900);
@@ -1085,7 +1241,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 if (any) {
                     const totalSecs = subsTimerStart ? Math.floor((Date.now() - subsTimerStart) / 1000) : null;
                     const timeStr = totalSecs != null ? ' (tardó ' + String(Math.floor(totalSecs / 60)).padStart(2, '0') + ':' + String(totalSecs % 60).padStart(2, '0') + ')' : '';
-                    showSubsMessage('success', '✓ Subtítulos listos' + timeStr + ' — descárgalos abajo.');
+                    const trimStr = usedTrimming ? ' · silencios omitidos' : '';
+                    showSubsMessage('success', '✓ Subtítulos listos' + timeStr + trimStr + ' — descárgalos abajo.');
                     lastSubtitleResult = result;
                     const burnSelect = document.getElementById('burnLangSelect');
                     const editSelect = document.getElementById('editLangSelect');
