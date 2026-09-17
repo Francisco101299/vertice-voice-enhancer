@@ -193,7 +193,12 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="progress-bar hidden" id="progressBar">
                     <div class="progress-fill" id="progressFill">0%</div>
                 </div>
-                <div class="warning" style="margin-top:9px;">Cuando termine, encontrarás el video procesado en la pestaña 📝 SUBTÍTULOS.</div>
+            </div>
+            <div class="section">
+                <h2>🎬 VIDEO PROCESADO</h2>
+                <video id="outputVideo" controls class="hidden"></video>
+                <button class="btn btn-secondary hidden" id="downloadVideoBtn" onclick="downloadProcessedVideo()">⬇ DESCARGAR VIDEO PROCESADO</button>
+                <div class="export-empty-hint" id="exportVideoEmptyHint">Todavía no procesaste ningún video.</div>
             </div>
         </div>
 
@@ -308,12 +313,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 <div class="warning" style="margin-top:9px;">
                     ⏳ Recodifica el video completo, tarda más.
                 </div>
-            </div>
-            <div class="section">
-                <h2>🎬 VIDEO PROCESADO</h2>
-                <video id="outputVideo" controls class="hidden"></video>
-                <button class="btn btn-secondary hidden" id="downloadVideoBtn" onclick="downloadProcessedVideo()">⬇ DESCARGAR VIDEO PROCESADO</button>
-                <div class="export-empty-hint" id="exportVideoEmptyHint">Todavía no procesaste ningún video. Ve a 🎬 EDITAR para empezar.</div>
             </div>
             <div class="section">
                 <h2>📝 SUBTÍTULOS (.SRT)</h2>
@@ -580,7 +579,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     const fname = 'filmstrip_' + String(i).padStart(3, '0') + '.jpg';
                     try {
                         const data = await engine.readFile(fname);
-                        const blob = new Blob([data.buffer], { type: 'image/jpeg' });
+                        const blob = new Blob([data], { type: 'image/jpeg' });
                         const url = URL.createObjectURL(blob);
                         ffmpegRuntimeBlobURLs.push(url);
                         const img = document.createElement('img');
@@ -1104,6 +1103,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     document.getElementById('burnSection').classList.remove('hidden');
                     document.getElementById('editSubsSection').classList.remove('hidden');
                     renderEditableSegments();
+                    updateExportEmptyHints();
                 } else {
                     showSubsMessage('error', '❌ No se detectó voz o texto para generar subtítulos.');
                 }
@@ -1366,7 +1366,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 setBurnStatus('FINALIZANDO', 'Generando el archivo final…', 92);
                 const data = await engine.readFile('burn_output.mp4');
-                const blob = new Blob([data.buffer], { type: 'video/mp4' });
+                const blob = new Blob([data], { type: 'video/mp4' });
                 const url = URL.createObjectURL(blob);
                 ffmpegRuntimeBlobURLs.push(url);
 
@@ -1387,6 +1387,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 setBurnStatus('LISTO', 'Video con subtítulos generado correctamente.', 100);
                 setTimeout(() => document.getElementById('burnProgressBar').classList.add('hidden'), 900);
                 showBurnMessage('success', '✓ Video con subtítulos listo — reprodúcelo o descárgalo arriba.');
+                updateExportEmptyHints();
 
                 await engine.deleteFile('burn_output.mp4').catch(() => {});
             } catch (err) {
@@ -1499,7 +1500,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 const st = document.getElementById('processStatus');
                 if (st) st.classList.add('hidden');
             }
-            if (mode === 'subtitles') updateExportEmptyHints();
+            if (mode === 'subtitles' || mode === 'edit') updateExportEmptyHints();
         }
 
         // Muestra/oculta los avisos de "todavía no generaste nada" para
@@ -1910,6 +1911,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 outputVideo.classList.remove('hidden');
 
                 document.getElementById('downloadVideoBtn').classList.remove('hidden');
+                updateExportEmptyHints();
 
                 updateProgress(100);
                 showStatus('video', 'success', '✅ VIDEO PROCESADO · LISTO PARA DESCARGAR');
