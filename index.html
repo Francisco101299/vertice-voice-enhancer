@@ -202,6 +202,18 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             <div class="section">
                 <h2>📝 GENERADOR DE SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
                 <div class="control-group">
+                    <label>Modelo de IA</label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="radio" name="whisperModelTier" value="Xenova/whisper-tiny" style="width:18px;height:18px;"> Rápido (~40MB, menos preciso, usa poca RAM)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="radio" name="whisperModelTier" value="Xenova/whisper-base" checked style="width:18px;height:18px;"> Equilibrado (~75MB, recomendado)
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
+                        <input type="radio" name="whisperModelTier" value="Xenova/whisper-small" style="width:18px;height:18px;"> Preciso (~250MB, más lento, más RAM — riesgo de cierre en celulares con poca memoria)
+                    </label>
+                </div>
+                <div class="control-group">
                     <label>Idiomas de salida</label>
                     <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;letter-spacing:0;margin-top:6px;">
                         <input type="checkbox" class="subtitleLangCheckbox" value="es" checked style="width:18px;height:18px;"> Español (original)
@@ -221,12 +233,13 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 </div>
                 <button class="btn btn-primary" id="generateSubsBtn" onclick="generateSubtitles()" disabled>GENERAR SUBTÍTULOS</button>
                 <button class="btn btn-secondary hidden" id="cancelSubsBtn" onclick="cancelSubtitleGeneration()" style="margin-top:8px;">❌ CANCELAR</button>
+                <div id="subsElapsedTime" class="hidden" style="margin-top:8px;text-align:center;font-size:.8rem;color:var(--muted);font-weight:700;letter-spacing:.04em;">⏱ 00:00</div>
                 <div id="subsStatus" class="status hidden"></div>
                 <div class="progress-bar hidden" id="subsProgressBar">
                     <div class="progress-fill" id="subsProgressFill">0%</div>
                 </div>
                 <div class="warning" style="margin-top:9px;">
-                    Usa el modelo Whisper "small" (mejor precisión, ~250MB de descarga la primera vez) y corre 100% en tu dispositivo. Es más lento que un modelo chico, sobre todo en celulares de gama media — dale tiempo. La calidad sigue dependiendo de la claridad del audio; nombres propios o acentos muy fuertes aún pueden generar errores ocasionales. Los archivos .srt aparecen en 💾 EXPORTAR.
+                    Corre 100% en tu dispositivo con Whisper (IA). Si tu celular es de gama media/baja o ya tuviste una pantalla de "se cerró la página" antes, usa "Rápido" o "Equilibrado" — "Preciso" puede agotar la memoria disponible en dispositivos con poca RAM. La calidad también depende de la claridad del audio; nombres propios o acentos muy fuertes pueden generar errores ocasionales sin importar el modelo. Los archivos .srt aparecen en 💾 EXPORTAR.
                 </div>
             </div>
             <div id="editSubsSection" class="section hidden">
@@ -639,6 +652,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         const SUBTITLE_WORKER_SRC = `
             let pipelinePromise = null;
             let whisperPipeline = null;
+            let whisperModelIdLoaded = null;
             const translationPipelines = {};
 
             const TRANSLATION_MODELS = {
@@ -659,8 +673,10 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 return fn;
             }
 
-            async function getWhisper(id) {
-                if (whisperPipeline) return whisperPipeline;
+            async function getWhisper(id, modelId) {
+                if (whisperPipeline && whisperModelIdLoaded === modelId) return whisperPipeline;
+                whisperPipeline = null;
+                whisperModelIdLoaded = modelId;
                 const pipelineFn = await getPipelineFn();
                 // Mismo modelo, mismos pesos, misma calidad — solo cambia el
                 // hardware que hace el cálculo. WebGPU (la GPU del celular)
@@ -671,7 +687,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 // detectar errores de carga, hay que medir la velocidad real.
                 try {
                     self.postMessage({ id, type: 'status', message: 'Probando aceleración por GPU (WebGPU)…' });
-                    const candidate = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
+                    const candidate = await pipelineFn('automatic-speech-recognition', modelId, {
                         device: 'webgpu',
                         progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
                     });
@@ -694,7 +710,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     self.postMessage({ id, type: 'status', message: 'GPU disponible y suficientemente rápida — usándola.' });
                 } catch (gpuErr) {
                     self.postMessage({ id, type: 'status', message: 'GPU no disponible o demasiado lenta en este dispositivo, usando CPU…' });
-                    whisperPipeline = await pipelineFn('automatic-speech-recognition', 'Xenova/whisper-small', {
+                    whisperPipeline = await pipelineFn('automatic-speech-recognition', modelId, {
                         progress_callback: (info) => self.postMessage({ id, type: 'model-progress', info })
                     });
                 }
@@ -731,7 +747,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             }
 
             self.onmessage = async (event) => {
-                const { id, samples, duration, languages } = event.data;
+                const { id, samples, duration, languages, modelId } = event.data;
                 try {
                     const audio = new Float32Array(samples);
                     const wantEs = languages.includes('es');
@@ -739,7 +755,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     const wantOther = languages.filter(l => l !== 'es' && l !== 'en');
 
                     self.postMessage({ id, type: 'status', message: 'Cargando modelo Whisper (puede tardar la primera vez)…' });
-                    const whisper = await getWhisper(id);
+                    const whisper = await getWhisper(id, modelId || 'Xenova/whisper-small');
 
                     const result = {};
 
@@ -807,7 +823,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             }
         }
 
-        function runSubtitleGeneration(monoFloat16k, duration, languages, onStatus) {
+        function runSubtitleGeneration(monoFloat16k, duration, languages, modelId, onStatus) {
             return new Promise((resolve, reject) => {
                 let worker;
                 try {
@@ -870,7 +886,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 worker.addEventListener('error', handleWorkerError);
 
                 const copy = monoFloat16k.slice();
-                worker.postMessage({ id, samples: copy.buffer, duration, languages }, [copy.buffer]);
+                worker.postMessage({ id, samples: copy.buffer, duration, languages, modelId }, [copy.buffer]);
             });
         }
 
@@ -972,6 +988,29 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             status.classList.remove('hidden');
         }
 
+        let subsTimerInterval = null;
+        let subsTimerStart = null;
+
+        function startSubsTimer() {
+            subsTimerStart = Date.now();
+            const el = document.getElementById('subsElapsedTime');
+            if (el) { el.classList.remove('hidden'); el.textContent = '⏱ 00:00'; }
+            subsTimerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - subsTimerStart) / 1000);
+                const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                const s = String(elapsed % 60).padStart(2, '0');
+                if (el) el.textContent = '⏱ ' + m + ':' + s;
+            }, 1000);
+        }
+
+        function stopSubsTimer() {
+            if (subsTimerInterval) {
+                clearInterval(subsTimerInterval);
+                subsTimerInterval = null;
+            }
+            return subsTimerStart ? Math.floor((Date.now() - subsTimerStart) / 1000) : null;
+        }
+
         async function generateSubtitles() {
             if (!uploadedVideo || !uploadedVideoBytes) {
                 showSubsMessage('error', '❌ Primero selecciona un video.');
@@ -987,6 +1026,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             const cancelBtn = document.getElementById('cancelSubsBtn');
             btn.disabled = true;
             cancelBtn.classList.remove('hidden');
+            startSubsTimer();
             document.getElementById('subsDownloads').innerHTML = '';
 
             try {
@@ -1006,7 +1046,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 setSubsStatus('CARGANDO IA', 'Descargando y preparando Whisper (solo la primera vez)…', 15);
 
-                const result = await runSubtitleGeneration(floatSamples, duration, langs, (msg) => {
+                const modelId = document.querySelector('input[name="whisperModelTier"]:checked')?.value || 'Xenova/whisper-base';
+                const result = await runSubtitleGeneration(floatSamples, duration, langs, modelId, (msg) => {
                     setSubsStatus('GENERANDO SUBTÍTULOS', msg, 55);
                 });
 
@@ -1035,7 +1076,9 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }
 
                 if (any) {
-                    showSubsMessage('success', '✓ Subtítulos listos — descárgalos en 💾 EXPORTAR.');
+                    const totalSecs = subsTimerStart ? Math.floor((Date.now() - subsTimerStart) / 1000) : null;
+                    const timeStr = totalSecs != null ? ' (tardó ' + String(Math.floor(totalSecs / 60)).padStart(2, '0') + ':' + String(totalSecs % 60).padStart(2, '0') + ')' : '';
+                    showSubsMessage('success', '✓ Subtítulos listos' + timeStr + ' — descárgalos en 💾 EXPORTAR.');
                     lastSubtitleResult = result;
                     const burnSelect = document.getElementById('burnLangSelect');
                     const editSelect = document.getElementById('editLangSelect');
@@ -1066,6 +1109,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             } finally {
                 btn.disabled = !uploadedVideoBytes;
                 cancelBtn.classList.add('hidden');
+                stopSubsTimer();
             }
         }
 
