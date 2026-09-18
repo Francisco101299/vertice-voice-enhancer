@@ -600,7 +600,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     if (m) duration = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
                 };
                 engine.on('log', durationHandler);
-                await engine.exec(['-i', 'filmstrip_input.mp4']).catch(() => {});
+                await engine.exec(['-i', 'filmstrip_input.mp4', '-f', 'null', 'filmstrip_probe.out']);
+                filmstripFiles.push('filmstrip_probe.out');
                 if (!duration || duration <= 0) duration = 10;
 
                 const numThumbs = 10;
@@ -1293,7 +1294,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                         if (m) totalDuration = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
                     };
                     engine.on('log', durationHandler);
-                    await engine.exec(['-i', 'subs_input.mp4']).catch(() => {});
+                    await engine.exec(['-i', 'subs_input.mp4', '-f', 'null', 'subs_duration_probe.out']);
+                    await engine.deleteFile('subs_duration_probe.out').catch(() => {});
 
                     let trimTimeline = null;
 
@@ -1438,6 +1440,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }
             } catch (err) {
                 console.error('Error generando subtítulos:', err);
+                resetFFmpegIfCorrupted(err);
                 if (err && /cancelada por el usuario/.test(err.message || '')) {
                     showSubsMessage('info', '⏹ Generación cancelada.');
                 } else {
@@ -1612,7 +1615,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                             }
                         };
                         engine.on('log', handler);
-                        engine.exec(['-i', filename]).catch(() => {}).finally(() => {
+                        engine.exec(['-i', filename, '-f', 'null', 'dims_probe.out']).catch(() => {}).finally(() => {
+                            engine.deleteFile('dims_probe.out').catch(() => {});
                             resolve({ width, height });
                         });
                     });
@@ -1729,6 +1733,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 await engine.deleteFile('burn_output.mp4').catch(() => {});
             } catch (err) {
                 console.error('Error quemando subtítulos:', err);
+                resetFFmpegIfCorrupted(err);
                 showBurnMessage('error', '❌ No se pudo pegar el subtítulo en el video: ' + (err.message || err));
             } finally {
                 const engine = ffmpeg;
@@ -1738,6 +1743,22 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     }
                 }
                 btn.disabled = false;
+            }
+        }
+
+        // Si FFmpeg (WASM) llega a fallar con un error de bajo nivel como
+        // "memory access out of bounds" o "RuntimeError", el módulo puede
+        // quedar en un estado corrupto — seguir usando la misma instancia
+        // probablemente vuelva a fallar. Esto detecta ese caso y fuerza que
+        // el PRÓXIMO intento cree una instancia nueva y limpia de FFmpeg.
+        function resetFFmpegIfCorrupted(err) {
+            const msg = (err && err.message) ? err.message : String(err || '');
+            if (/memory access out of bounds|RuntimeError|unreachable|abort\(/i.test(msg)) {
+                console.warn('FFmpeg parece haber quedado en mal estado tras un error de WASM — se reiniciará en el próximo intento.');
+                try { if (ffmpeg && typeof ffmpeg.terminate === 'function') ffmpeg.terminate(); } catch (_) {}
+                ffmpeg = null;
+                ffmpegLoaded = false;
+                ffmpegLoading = null;
             }
         }
 
@@ -2261,6 +2282,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 await engine.deleteFile('output.mp4').catch(() => {});
             } catch (err) {
                 console.error(err);
+                resetFFmpegIfCorrupted(err);
                 updateProgress(0);
                 showStatus('video', 'error', '❌ ERROR: ' + (err?.message || String(err)));
             } finally {
