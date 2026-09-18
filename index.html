@@ -210,7 +210,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     <label>🌐 Transcripción en la nube (Groq) <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">MÁS RÁPIDO</span></label>
                     <button class="btn btn-secondary" id="cloudToggleBtn" onclick="toggleCloudTranscription()">ACTIVAR</button>
                     <div id="cloudProxySection" class="hidden" style="margin-top:10px;">
-                        <input type="text" id="groqProxyUrl" placeholder="https://tu-proxy.workers.dev" style="width:100%;padding:10px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;" oninput="saveGroqProxyUrl()">
+                        <input type="text" id="groqProxyUrl" placeholder="https://tu-proxy.workers.dev" value="https://vertice-groq-proxy.franckxx101219990.workers.dev/" style="width:100%;padding:10px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;" oninput="saveGroqProxyUrl()">
                     </div>
                     <div class="warning" style="margin-top:9px;">
                         ⚠️ El audio sale de tu dispositivo y se procesa en un servidor (Groq). Requiere desplegar un proxy propio gratis — revisa el archivo <code>groq-proxy-worker.js</code> que te compartí para las instrucciones.
@@ -1278,6 +1278,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 // otras partes de la app: el log de análisis de FFmpeg).
                 const cloudUrl = document.getElementById('groqProxyUrl').value.trim();
                 let result;
+                let usedTrimming = false; // solo se usa/activa en el camino local
 
                 if (useCloudTranscription && cloudUrl) {
                     // -------- CAMINO NUBE (Groq, vía proxy propio) --------
@@ -1317,7 +1318,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     await engine.exec(['-i', 'subs_input.mp4']).catch(() => {});
 
                     let trimTimeline = null;
-                    let usedTrimming = false;
 
                     if (totalDuration && totalDuration > 8) {
                         try {
