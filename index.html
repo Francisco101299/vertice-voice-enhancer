@@ -1722,6 +1722,14 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 ffmpegRuntimeBlobURLs.push(url);
 
                 const video = document.getElementById('burnOutputVideo');
+                video.onerror = () => {
+                    // El archivo puede estar perfecto (se descarga y reproduce
+                    // bien fuera del navegador) aunque el <video> integrado de
+                    // este navegador/dispositivo no logre mostrarlo — es una
+                    // limitación del reproductor, no del archivo en sí.
+                    video.classList.add('hidden');
+                    showBurnMessage('info', '⚠️ El video se generó bien, pero este navegador no puede mostrar la vista previa aquí. Descárgalo abajo — se reproduce normal fuera de la página.');
+                };
                 video.src = url;
                 video.classList.remove('hidden');
 
@@ -2258,6 +2266,10 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 processedVideoBlob = URL.createObjectURL(videoBlob);
 
                 const outputVideo = document.getElementById('outputVideo');
+                outputVideo.onerror = () => {
+                    outputVideo.classList.add('hidden');
+                    showStatus('video', 'info', '⚠️ El video se procesó bien, pero este navegador no puede mostrar la vista previa aquí. Descárgalo abajo — se reproduce normal fuera de la página.');
+                };
                 outputVideo.src = processedVideoBlob;
                 outputVideo.classList.remove('hidden');
 
