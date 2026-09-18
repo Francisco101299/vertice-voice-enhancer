@@ -207,6 +207,16 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             <div class="section">
                 <h2>📝 SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
                 <div class="control-group">
+                    <label>🌐 Transcripción en la nube (Groq) <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">MÁS RÁPIDO</span></label>
+                    <button class="btn btn-secondary" id="cloudToggleBtn" onclick="toggleCloudTranscription()">ACTIVAR</button>
+                    <div id="cloudProxySection" class="hidden" style="margin-top:10px;">
+                        <input type="text" id="groqProxyUrl" placeholder="https://tu-proxy.workers.dev" style="width:100%;padding:10px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;" oninput="saveGroqProxyUrl()">
+                    </div>
+                    <div class="warning" style="margin-top:9px;">
+                        ⚠️ El audio sale de tu dispositivo y se procesa en un servidor (Groq). Requiere desplegar un proxy propio gratis — revisa el archivo <code>groq-proxy-worker.js</code> que te compartí para las instrucciones.
+                    </div>
+                </div>
+                <div class="control-group">
                     <label>Modelo</label>
                     <div class="chip-row">
                         <label class="chip-option">
@@ -537,6 +547,64 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         }
 
         // ==========================================================
+        // TRANSCRIPCIÓN EN LA NUBE (Groq, vía un proxy propio)
+        // ==========================================================
+        // El audio deja de procesarse solo en el dispositivo: se manda a
+        // un servidor intermediario (que despliega el propio usuario, gratis,
+        // en Cloudflare Workers) que a su vez llama a la API de Groq. Ver
+        // groq-proxy-worker.js para el código del proxy e instrucciones.
+        let useCloudTranscription = false;
+
+        function toggleCloudTranscription() {
+            useCloudTranscription = !useCloudTranscription;
+            const btn = document.getElementById('cloudToggleBtn');
+            btn.textContent = useCloudTranscription ? 'DESACTIVAR' : 'ACTIVAR';
+            btn.classList.toggle('btn-primary', useCloudTranscription);
+            btn.classList.toggle('btn-secondary', !useCloudTranscription);
+            document.getElementById('cloudProxySection').classList.toggle('hidden', !useCloudTranscription);
+        }
+
+        function saveGroqProxyUrl() {
+            try {
+                localStorage.setItem('vertice_groq_proxy_url', document.getElementById('groqProxyUrl').value.trim());
+            } catch (_) { /* localStorage puede no estar disponible; no es crítico */ }
+        }
+
+        function loadGroqProxyUrl() {
+            try {
+                const saved = localStorage.getItem('vertice_groq_proxy_url');
+                if (saved) document.getElementById('groqProxyUrl').value = saved;
+            } catch (_) {}
+        }
+
+        // Envía el audio comprimido al proxy, que lo reenvía a Groq.
+        // task: 'transcribe' (idioma original) o 'translate' (siempre a inglés).
+        async function runCloudTranscription(fileBlob, task, language) {
+            const proxyUrl = document.getElementById('groqProxyUrl').value.trim();
+            if (!proxyUrl) throw new Error('Falta la URL de tu proxy (revisa groq-proxy-worker.js).');
+
+            const formData = new FormData();
+            formData.append('file', fileBlob, 'audio.m4a');
+            formData.append('task', task);
+            if (language) formData.append('language', language);
+
+            const resp = await fetch(proxyUrl, { method: 'POST', body: formData });
+            if (!resp.ok) {
+                const errText = await resp.text().catch(() => '');
+                throw new Error('El proxy/Groq respondió con error (' + resp.status + '): ' + errText.slice(0, 200));
+            }
+            const json = await resp.json();
+            if (!Array.isArray(json.segments)) {
+                throw new Error('La respuesta no trajo segmentos con tiempos (revisa la configuración del proxy).');
+            }
+            return json.segments.map(seg => ({
+                start: seg.start,
+                end: seg.end,
+                text: (seg.text || '').trim()
+            })).filter(s => s.text.length > 0);
+        }
+
+        // ==========================================================
         // LÍNEA DE TIEMPO CON MINIATURAS (filmstrip, estilo CapCut)
         // ==========================================================
         // Extrae varios fotogramas del video con FFmpeg (en una sola
@@ -753,8 +821,40 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }).filter(s => s.text.length > 0);
             }
 
+            async function translateSegments(id, esSegments, lang) {
+                const translator = await getTranslator(id, lang);
+                const translated = [];
+                for (const seg of esSegments) {
+                    const out = await translator(seg.text, { top_k: 0, do_sample: false, num_beams: 1 });
+                    const text = Array.isArray(out) ? (out[0]?.translation_text || '') : (out.translation_text || '');
+                    translated.push({ start: seg.start, end: seg.end, text: text.trim() });
+                }
+                return translated;
+            }
+
             self.onmessage = async (event) => {
-                const { id, samples, duration, languages, modelId } = event.data;
+                const { id, mode } = event.data;
+
+                // Modo "solo traducir texto": se usa cuando la transcripción
+                // en español ya vino de otro lado (ej. la nube/Groq) y solo
+                // hace falta traducir el TEXTO a otros idiomas con OPUS-MT,
+                // sin tocar audio ni Whisper para nada.
+                if (mode === 'translateOnly') {
+                    const { esSegments, languages } = event.data;
+                    try {
+                        const result = {};
+                        for (const lang of languages) {
+                            self.postMessage({ id, type: 'status', message: 'Traduciendo texto (' + lang + ')…' });
+                            result[lang] = await translateSegments(id, esSegments, lang);
+                        }
+                        self.postMessage({ id, type: 'done', result });
+                    } catch (err) {
+                        self.postMessage({ id, type: 'error', message: (err && err.message) || String(err) });
+                    }
+                    return;
+                }
+
+                const { samples, duration, languages, modelId } = event.data;
                 try {
                     const audio = new Float32Array(samples);
                     const wantEs = languages.includes('es');
@@ -791,14 +891,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                     for (const lang of wantOther) {
                         self.postMessage({ id, type: 'status', message: 'Traduciendo texto (' + lang + ')…' });
-                        const translator = await getTranslator(id, lang);
-                        const translated = [];
-                        for (const seg of esSegments) {
-                            const out = await translator(seg.text, { top_k: 0, do_sample: false, num_beams: 1 });
-                            const text = Array.isArray(out) ? (out[0]?.translation_text || '') : (out.translation_text || '');
-                            translated.push({ start: seg.start, end: seg.end, text: text.trim() });
-                        }
-                        result[lang] = translated;
+                        result[lang] = await translateSegments(id, esSegments, lang);
                     }
 
                     self.postMessage({ id, type: 'done', result });
@@ -894,6 +987,70 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 const copy = monoFloat16k.slice();
                 worker.postMessage({ id, samples: copy.buffer, duration, languages, modelId }, [copy.buffer]);
+            });
+        }
+
+        // Igual que runSubtitleGeneration, pero sin audio: se usa cuando la
+        // transcripción en español ya vino de la nube (Groq) y solo hace
+        // falta traducir el TEXTO a otros idiomas con OPUS-MT localmente.
+        function runTranslateOnly(esSegments, languages, onStatus) {
+            return new Promise((resolve, reject) => {
+                let worker;
+                try {
+                    worker = getSubtitleWorker();
+                } catch (err) {
+                    reject(err);
+                    return;
+                }
+
+                const id = ++subtitleMsgId;
+                const timeoutMs = 10 * 60 * 1000;
+                const timeout = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('La traducción de texto tardó demasiado.'));
+                }, timeoutMs);
+
+                activeSubtitleAbort = (err) => {
+                    clearTimeout(timeout);
+                    cleanup();
+                    reject(err);
+                };
+
+                function handleMessage(e) {
+                    if (!e.data || e.data.id !== id) return;
+                    if (e.data.type === 'status') {
+                        if (onStatus) onStatus(e.data.message);
+                    } else if (e.data.type === 'model-progress') {
+                        const p = e.data.info;
+                        if (p && typeof p.progress === 'number' && onStatus) {
+                            onStatus('Descargando modelo de traducción… ' + Math.round(p.progress) + '%');
+                        }
+                    } else if (e.data.type === 'done') {
+                        clearTimeout(timeout);
+                        cleanup();
+                        activeSubtitleAbort = null;
+                        resolve(e.data.result);
+                    } else if (e.data.type === 'error') {
+                        clearTimeout(timeout);
+                        cleanup();
+                        activeSubtitleAbort = null;
+                        reject(new Error(e.data.message || 'Error desconocido traduciendo texto.'));
+                    }
+                }
+                function handleWorkerError(e) {
+                    clearTimeout(timeout);
+                    cleanup();
+                    activeSubtitleAbort = null;
+                    reject(new Error('El Worker de traducción falló: ' + (e?.message || 'error desconocido')));
+                }
+                function cleanup() {
+                    worker.removeEventListener('message', handleMessage);
+                    worker.removeEventListener('error', handleWorkerError);
+                }
+                worker.addEventListener('message', handleMessage);
+                worker.addEventListener('error', handleWorkerError);
+
+                worker.postMessage({ id, mode: 'translateOnly', esSegments, languages });
             });
         }
 
@@ -1100,6 +1257,10 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 showSubsMessage('error', '❌ Elige al menos un idioma.');
                 return;
             }
+            if (useCloudTranscription && !document.getElementById('groqProxyUrl').value.trim()) {
+                showSubsMessage('error', '❌ Activaste la nube pero falta la URL de tu proxy. Pégala arriba (ver groq-proxy-worker.js).');
+                return;
+            }
 
             const btn = document.getElementById('generateSubsBtn');
             const cancelBtn = document.getElementById('cancelSubsBtn');
@@ -1115,102 +1276,135 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 // Duración real del video (mismo recurso que usamos en
                 // otras partes de la app: el log de análisis de FFmpeg).
-                let totalDuration = null;
-                const durationHandler = ({ message }) => {
-                    const m = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
-                    if (m) totalDuration = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
-                };
-                engine.on('log', durationHandler);
-                await engine.exec(['-i', 'subs_input.mp4']).catch(() => {});
+                const cloudUrl = document.getElementById('groqProxyUrl').value.trim();
+                let result;
 
-                let trimTimeline = null;
-                let usedTrimming = false;
+                if (useCloudTranscription && cloudUrl) {
+                    // -------- CAMINO NUBE (Groq, vía proxy propio) --------
+                    setSubsStatus('PREPARANDO AUDIO', 'Comprimiendo audio para enviar…', 10);
+                    await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '64k', 'subs_cloud.m4a']);
+                    const audioData = await engine.readFile('subs_cloud.m4a');
+                    const audioBlob = new Blob([audioData], { type: 'audio/mp4' });
+                    await engine.deleteFile('subs_input.mp4').catch(() => {});
+                    await engine.deleteFile('subs_cloud.m4a').catch(() => {});
 
-                if (totalDuration && totalDuration > 8) {
-                    try {
-                        setSubsStatus('ANALIZANDO AUDIO', 'Buscando silencios para acelerar el proceso…', 8);
-                        const speechSegments = await detectSpeechSegments(engine, 'subs_input.mp4', totalDuration);
-                        const totalSpeech = speechSegments.reduce((s, seg) => s + (seg.end - seg.start), 0);
+                    result = {};
+                    let esBase = null;
 
-                        // Solo vale la pena si de verdad hay silencio que ahorrar.
-                        if (speechSegments.length > 0 && totalSpeech < totalDuration * 0.85) {
-                            const PAD = 0.25; // margen para no cortar palabras
-                            const padded = speechSegments.map(seg => ({
-                                start: Math.max(0, seg.start - PAD),
-                                end: Math.min(totalDuration, seg.end + PAD)
-                            }));
-                            // Fusionar tramos que quedaron pegados por el margen
-                            const merged = [];
-                            for (const seg of padded) {
-                                const last = merged[merged.length - 1];
-                                if (last && seg.start <= last.end) {
-                                    last.end = Math.max(last.end, seg.end);
-                                } else {
-                                    merged.push({ start: seg.start, end: seg.end });
-                                }
-                            }
-
-                            const keptSecs = merged.reduce((s, seg) => s + (seg.end - seg.start), 0);
-                            const savedSecs = Math.max(0, Math.round(totalDuration - keptSecs));
-                            setSubsStatus('OPTIMIZANDO', 'Se omiten ~' + savedSecs + 's de silencio para ir más rápido…', 12);
-
-                            const filterParts = [];
-                            const labels = [];
-                            merged.forEach((seg, i) => {
-                                filterParts.push('[0:a]atrim=start=' + seg.start.toFixed(3) + ':end=' + seg.end.toFixed(3) + ',asetpts=PTS-STARTPTS[a' + i + ']');
-                                labels.push('[a' + i + ']');
-                            });
-                            filterParts.push(labels.join('') + 'concat=n=' + merged.length + ':v=0:a=1[outa]');
-
-                            await engine.exec([
-                                '-i', 'subs_input.mp4',
-                                '-filter_complex', filterParts.join(';'),
-                                '-map', '[outa]',
-                                '-ac', '1', '-ar', '16000', '-f', 'f32le',
-                                'subs_audio.pcm'
-                            ]);
-
-                            trimTimeline = buildTrimTimeline(merged);
-                            usedTrimming = true;
-                        }
-                    } catch (vadErr) {
-                        console.warn('Salto de silencios no disponible, se usará el audio completo:', vadErr);
-                        usedTrimming = false;
-                        trimTimeline = null;
+                    if (langs.includes('es') || langs.some(l => !['es', 'en'].includes(l))) {
+                        setSubsStatus('TRANSCRIBIENDO (NUBE)', 'Enviando audio a Groq…', 35);
+                        esBase = await runCloudTranscription(audioBlob, 'transcribe', 'es');
+                        if (langs.includes('es')) result.es = esBase;
                     }
-                }
-
-                if (!usedTrimming) {
-                    setSubsStatus('PREPARANDO AUDIO', 'Extrayendo audio a 16kHz mono (formato que exige Whisper)…', 12);
-                    await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', 'subs_audio.pcm']);
-                }
-
-                const rawPcm = await engine.readFile('subs_audio.pcm');
-                const floatSamples = new Float32Array(Math.floor(rawPcm.length / 4));
-                new Uint8Array(floatSamples.buffer).set(rawPcm.subarray(0, floatSamples.length * 4));
-
-                await engine.deleteFile('subs_input.mp4').catch(() => {});
-                await engine.deleteFile('subs_audio.pcm').catch(() => {});
-
-                const duration = floatSamples.length / 16000;
-
-                setSubsStatus('CARGANDO IA', 'Descargando y preparando Whisper (solo la primera vez)…', 15);
-
-                const modelId = document.querySelector('input[name="whisperModelTier"]:checked')?.value || 'Xenova/whisper-base';
-                const result = await runSubtitleGeneration(floatSamples, duration, langs, modelId, (msg) => {
-                    setSubsStatus('GENERANDO SUBTÍTULOS', msg, 55);
-                });
-
-                // Si recortamos silencios, los tiempos que devolvió Whisper
-                // están en la línea de tiempo del audio recortado — hay que
-                // volver a ubicarlos en el tiempo real del video original.
-                if (trimTimeline) {
-                    for (const lang of Object.keys(result)) {
-                        result[lang] = result[lang].map(seg => ({
-                            start: remapTrimmedToOriginal(seg.start, trimTimeline),
-                            end: remapTrimmedToOriginal(seg.end, trimTimeline),
-                            text: seg.text
+                    if (langs.includes('en')) {
+                        setSubsStatus('TRADUCIENDO A INGLÉS (NUBE)', 'Enviando audio a Groq…', 55);
+                        result.en = await runCloudTranscription(audioBlob, 'translate', 'es');
+                    }
+                    const otherLangs = langs.filter(l => l !== 'es' && l !== 'en');
+                    if (otherLangs.length > 0 && esBase) {
+                        result = Object.assign(result, await runTranslateOnly(esBase, otherLangs, (msg) => {
+                            setSubsStatus('TRADUCIENDO TEXTO', msg, 75);
                         }));
+                    }
+                } else {
+                    // -------- CAMINO LOCAL (Whisper en el dispositivo) --------
+                    let totalDuration = null;
+                    const durationHandler = ({ message }) => {
+                        const m = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
+                        if (m) totalDuration = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+                    };
+                    engine.on('log', durationHandler);
+                    await engine.exec(['-i', 'subs_input.mp4']).catch(() => {});
+
+                    let trimTimeline = null;
+                    let usedTrimming = false;
+
+                    if (totalDuration && totalDuration > 8) {
+                        try {
+                            setSubsStatus('ANALIZANDO AUDIO', 'Buscando silencios para acelerar el proceso…', 8);
+                            const speechSegments = await detectSpeechSegments(engine, 'subs_input.mp4', totalDuration);
+                            const totalSpeech = speechSegments.reduce((s, seg) => s + (seg.end - seg.start), 0);
+
+                            // Solo vale la pena si de verdad hay silencio que ahorrar.
+                            if (speechSegments.length > 0 && totalSpeech < totalDuration * 0.85) {
+                                const PAD = 0.25; // margen para no cortar palabras
+                                const padded = speechSegments.map(seg => ({
+                                    start: Math.max(0, seg.start - PAD),
+                                    end: Math.min(totalDuration, seg.end + PAD)
+                                }));
+                                // Fusionar tramos que quedaron pegados por el margen
+                                const merged = [];
+                                for (const seg of padded) {
+                                    const last = merged[merged.length - 1];
+                                    if (last && seg.start <= last.end) {
+                                        last.end = Math.max(last.end, seg.end);
+                                    } else {
+                                        merged.push({ start: seg.start, end: seg.end });
+                                    }
+                                }
+
+                                const keptSecs = merged.reduce((s, seg) => s + (seg.end - seg.start), 0);
+                                const savedSecs = Math.max(0, Math.round(totalDuration - keptSecs));
+                                setSubsStatus('OPTIMIZANDO', 'Se omiten ~' + savedSecs + 's de silencio para ir más rápido…', 12);
+
+                                const filterParts = [];
+                                const labels = [];
+                                merged.forEach((seg, i) => {
+                                    filterParts.push('[0:a]atrim=start=' + seg.start.toFixed(3) + ':end=' + seg.end.toFixed(3) + ',asetpts=PTS-STARTPTS[a' + i + ']');
+                                    labels.push('[a' + i + ']');
+                                });
+                                filterParts.push(labels.join('') + 'concat=n=' + merged.length + ':v=0:a=1[outa]');
+
+                                await engine.exec([
+                                    '-i', 'subs_input.mp4',
+                                    '-filter_complex', filterParts.join(';'),
+                                    '-map', '[outa]',
+                                    '-ac', '1', '-ar', '16000', '-f', 'f32le',
+                                    'subs_audio.pcm'
+                                ]);
+
+                                trimTimeline = buildTrimTimeline(merged);
+                                usedTrimming = true;
+                            }
+                        } catch (vadErr) {
+                            console.warn('Salto de silencios no disponible, se usará el audio completo:', vadErr);
+                            usedTrimming = false;
+                            trimTimeline = null;
+                        }
+                    }
+
+                    if (!usedTrimming) {
+                        setSubsStatus('PREPARANDO AUDIO', 'Extrayendo audio a 16kHz mono (formato que exige Whisper)…', 12);
+                        await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', 'subs_audio.pcm']);
+                    }
+
+                    const rawPcm = await engine.readFile('subs_audio.pcm');
+                    const floatSamples = new Float32Array(Math.floor(rawPcm.length / 4));
+                    new Uint8Array(floatSamples.buffer).set(rawPcm.subarray(0, floatSamples.length * 4));
+
+                    await engine.deleteFile('subs_input.mp4').catch(() => {});
+                    await engine.deleteFile('subs_audio.pcm').catch(() => {});
+
+                    const duration = floatSamples.length / 16000;
+
+                    setSubsStatus('CARGANDO IA', 'Descargando y preparando Whisper (solo la primera vez)…', 15);
+
+                    const modelId = document.querySelector('input[name="whisperModelTier"]:checked')?.value || 'Xenova/whisper-base';
+                    result = await runSubtitleGeneration(floatSamples, duration, langs, modelId, (msg) => {
+                        setSubsStatus('GENERANDO SUBTÍTULOS', msg, 55);
+                    });
+
+                    // Si recortamos silencios, los tiempos que devolvió Whisper
+                    // están en la línea de tiempo del audio recortado — hay que
+                    // volver a ubicarlos en el tiempo real del video original.
+                    if (trimTimeline) {
+                        for (const lang of Object.keys(result)) {
+                            result[lang] = result[lang].map(seg => ({
+                                start: remapTrimmedToOriginal(seg.start, trimTimeline),
+                                end: remapTrimmedToOriginal(seg.end, trimTimeline),
+                                text: seg.text
+                            }));
+                        }
                     }
                 }
 
@@ -2128,6 +2322,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         function updateVideoNoise(val) { document.getElementById('videoNoiseValue').textContent = val; }
     </script>
     <script>
+        window.addEventListener('load', loadGroqProxyUrl);
+
         window.addEventListener('beforeunload', () => {
             try { if (ffmpeg && typeof ffmpeg.terminate === 'function') ffmpeg.terminate(); } catch (_) {}
             try { if (rnnoiseWorkerInstance) rnnoiseWorkerInstance.terminate(); } catch (_) {}
