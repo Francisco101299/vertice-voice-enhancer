@@ -206,16 +206,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         <div id="subtitlesPanel" class="panel">
             <div class="section">
                 <h2>📝 SUBTÍTULOS <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">EXPERIMENTAL</span></h2>
-                <div class="control-group">
-                    <label>🌐 Transcripción en la nube (Groq) <span style="font-size:.6rem;color:#ffc857;letter-spacing:.05em;">MÁS RÁPIDO</span></label>
-                    <button class="btn btn-secondary" id="cloudToggleBtn" onclick="toggleCloudTranscription()">ACTIVAR</button>
-                    <div id="cloudProxySection" class="hidden" style="margin-top:10px;">
-                        <input type="text" id="groqProxyUrl" placeholder="https://tu-proxy.workers.dev" value="https://vertice-groq-proxy.franckxx101219990.workers.dev/" style="width:100%;padding:10px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;" oninput="saveGroqProxyUrl()">
-                    </div>
-                    <div class="warning" style="margin-top:9px;">
-                        ⚠️ El audio sale de tu dispositivo y se procesa en un servidor (Groq). Requiere desplegar un proxy propio gratis — revisa el archivo <code>groq-proxy-worker.js</code> que te compartí para las instrucciones.
-                    </div>
-                </div>
+                <input type="hidden" id="groqProxyUrl" value="https://vertice-groq-proxy.franckxx101219990.workers.dev/">
                 <div class="control-group">
                     <label>Modelo</label>
                     <div class="chip-row">
@@ -549,33 +540,11 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         // ==========================================================
         // TRANSCRIPCIÓN EN LA NUBE (Groq, vía un proxy propio)
         // ==========================================================
-        // El audio deja de procesarse solo en el dispositivo: se manda a
-        // un servidor intermediario (que despliega el propio usuario, gratis,
-        // en Cloudflare Workers) que a su vez llama a la API de Groq. Ver
-        // groq-proxy-worker.js para el código del proxy e instrucciones.
-        let useCloudTranscription = false;
-
-        function toggleCloudTranscription() {
-            useCloudTranscription = !useCloudTranscription;
-            const btn = document.getElementById('cloudToggleBtn');
-            btn.textContent = useCloudTranscription ? 'DESACTIVAR' : 'ACTIVAR';
-            btn.classList.toggle('btn-primary', useCloudTranscription);
-            btn.classList.toggle('btn-secondary', !useCloudTranscription);
-            document.getElementById('cloudProxySection').classList.toggle('hidden', !useCloudTranscription);
-        }
-
-        function saveGroqProxyUrl() {
-            try {
-                localStorage.setItem('vertice_groq_proxy_url', document.getElementById('groqProxyUrl').value.trim());
-            } catch (_) { /* localStorage puede no estar disponible; no es crítico */ }
-        }
-
-        function loadGroqProxyUrl() {
-            try {
-                const saved = localStorage.getItem('vertice_groq_proxy_url');
-                if (saved) document.getElementById('groqProxyUrl').value = saved;
-            } catch (_) {}
-        }
+        // Se intenta SIEMPRE primero, automáticamente, sin que el usuario
+        // tenga que activar nada. Si el proxy/Groq fallan por cualquier
+        // motivo (sin internet, proxy caído, etc.), se cae automáticamente
+        // al modelo local (Whisper en el dispositivo) sin interrumpir el
+        // proceso. Ver groq-proxy-worker.js para el código del proxy.
 
         // Envía el audio comprimido al proxy, que lo reenvía a Groq.
         // task: 'transcribe' (idioma original) o 'translate' (siempre a inglés).
@@ -1257,10 +1226,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 showSubsMessage('error', '❌ Elige al menos un idioma.');
                 return;
             }
-            if (useCloudTranscription && !document.getElementById('groqProxyUrl').value.trim()) {
-                showSubsMessage('error', '❌ Activaste la nube pero falta la URL de tu proxy. Pégala arriba (ver groq-proxy-worker.js).');
-                return;
-            }
 
             const btn = document.getElementById('generateSubsBtn');
             const cancelBtn = document.getElementById('cancelSubsBtn');
@@ -1276,39 +1241,52 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 // Duración real del video (mismo recurso que usamos en
                 // otras partes de la app: el log de análisis de FFmpeg).
-                const cloudUrl = document.getElementById('groqProxyUrl').value.trim();
-                let result;
+                let result = null;
                 let usedTrimming = false; // solo se usa/activa en el camino local
+                let cloudFailed = false;
 
-                if (useCloudTranscription && cloudUrl) {
-                    // -------- CAMINO NUBE (Groq, vía proxy propio) --------
-                    setSubsStatus('PREPARANDO AUDIO', 'Comprimiendo audio para enviar…', 10);
-                    await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '64k', 'subs_cloud.m4a']);
-                    const audioData = await engine.readFile('subs_cloud.m4a');
-                    const audioBlob = new Blob([audioData], { type: 'audio/mp4' });
-                    await engine.deleteFile('subs_input.mp4').catch(() => {});
-                    await engine.deleteFile('subs_cloud.m4a').catch(() => {});
+                // -------- Intento automático: NUBE primero (Groq) --------
+                const cloudUrl = document.getElementById('groqProxyUrl').value.trim();
+                if (cloudUrl) {
+                    try {
+                        setSubsStatus('PREPARANDO AUDIO', 'Comprimiendo audio para enviar…', 10);
+                        await engine.exec(['-i', 'subs_input.mp4', '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'aac', '-b:a', '64k', 'subs_cloud.m4a']);
+                        const audioData = await engine.readFile('subs_cloud.m4a');
+                        const audioBlob = new Blob([audioData], { type: 'audio/mp4' });
+                        await engine.deleteFile('subs_cloud.m4a').catch(() => {});
 
-                    result = {};
-                    let esBase = null;
+                        const cloudResult = {};
+                        let esBase = null;
 
-                    if (langs.includes('es') || langs.some(l => !['es', 'en'].includes(l))) {
-                        setSubsStatus('TRANSCRIBIENDO (NUBE)', 'Enviando audio a Groq…', 35);
-                        esBase = await runCloudTranscription(audioBlob, 'transcribe', 'es');
-                        if (langs.includes('es')) result.es = esBase;
+                        if (langs.includes('es') || langs.some(l => !['es', 'en'].includes(l))) {
+                            setSubsStatus('TRANSCRIBIENDO (NUBE)', 'Enviando audio a Groq…', 35);
+                            esBase = await runCloudTranscription(audioBlob, 'transcribe', 'es');
+                            if (langs.includes('es')) cloudResult.es = esBase;
+                        }
+                        if (langs.includes('en')) {
+                            setSubsStatus('TRADUCIENDO A INGLÉS (NUBE)', 'Enviando audio a Groq…', 55);
+                            cloudResult.en = await runCloudTranscription(audioBlob, 'translate', 'es');
+                        }
+                        const otherLangs = langs.filter(l => l !== 'es' && l !== 'en');
+                        if (otherLangs.length > 0 && esBase) {
+                            Object.assign(cloudResult, await runTranslateOnly(esBase, otherLangs, (msg) => {
+                                setSubsStatus('TRADUCIENDO TEXTO', msg, 75);
+                            }));
+                        }
+                        result = cloudResult;
+                        await engine.deleteFile('subs_input.mp4').catch(() => {});
+                    } catch (cloudErr) {
+                        console.warn('La transcripción en la nube falló, usando el modelo local automáticamente:', cloudErr);
+                        cloudFailed = true;
+                        result = null;
                     }
-                    if (langs.includes('en')) {
-                        setSubsStatus('TRADUCIENDO A INGLÉS (NUBE)', 'Enviando audio a Groq…', 55);
-                        result.en = await runCloudTranscription(audioBlob, 'translate', 'es');
+                }
+
+                if (!result) {
+                    // -------- Respaldo automático: LOCAL (Whisper en el dispositivo) --------
+                    if (cloudFailed) {
+                        setSubsStatus('NUBE NO DISPONIBLE', 'Usando el modelo local en su lugar…', 10);
                     }
-                    const otherLangs = langs.filter(l => l !== 'es' && l !== 'en');
-                    if (otherLangs.length > 0 && esBase) {
-                        result = Object.assign(result, await runTranslateOnly(esBase, otherLangs, (msg) => {
-                            setSubsStatus('TRADUCIENDO TEXTO', msg, 75);
-                        }));
-                    }
-                } else {
-                    // -------- CAMINO LOCAL (Whisper en el dispositivo) --------
                     let totalDuration = null;
                     const durationHandler = ({ message }) => {
                         const m = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
@@ -2334,8 +2312,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
         function updateVideoNoise(val) { document.getElementById('videoNoiseValue').textContent = val; }
     </script>
     <script>
-        window.addEventListener('load', loadGroqProxyUrl);
-
         window.addEventListener('beforeunload', () => {
             try { if (ffmpeg && typeof ffmpeg.terminate === 'function') ffmpeg.terminate(); } catch (_) {}
             try { if (rnnoiseWorkerInstance) rnnoiseWorkerInstance.terminate(); } catch (_) {}
