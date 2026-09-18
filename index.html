@@ -2075,7 +2075,10 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     bytesOk = true;
                     updateProcessButtonState();
                     maybeShowCombinedStatus();
-                    generateFilmstrip();
+                    // NO se genera el filmstrip (ni ningún otro trabajo de
+                    // FFmpeg) automáticamente aquí. Solo leemos los bytes del
+                    // archivo en memoria — eso no es "procesar", es preparar
+                    // el video para cuando el usuario decida procesarlo.
                 } catch (readErr) {
                     console.error(readErr);
                     if (uploadedVideo !== file) return;
