@@ -271,6 +271,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             </div>
             <div id="burnSection" class="section hidden">
                 <h2>📌 PEGAR SUBTÍTULOS EN EL VIDEO</h2>
+                <input type="hidden" id="burnServerUrl" value="">
                 <label>Idioma</label>
                 <select id="burnLangSelect" style="width:100%;padding:10px;margin-top:8px;background:#0a0e14;color:#eafff0;border:1px solid rgba(255,255,255,.15);border-radius:8px;"></select>
                 <label style="margin-top:14px;">Estilo del subtítulo</label>
@@ -312,7 +313,7 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     <div class="progress-fill" id="burnProgressFill">0%</div>
                 </div>
                 <div class="warning" style="margin-top:9px;">
-                    ⏳ Recodifica el video completo, tarda más.
+                    ⏳ Recodifica el video completo (más rápido ahora, con algo menos de nitidez de imagen).
                 </div>
             </div>
             <div class="section">
@@ -1561,6 +1562,26 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
             status.classList.remove('hidden');
         }
 
+        async function runCloudBurn(videoBlob, segments, styleKey) {
+            const serverUrl = document.getElementById('burnServerUrl').value.trim();
+            if (!serverUrl) throw new Error('No hay servidor de pegado configurado.');
+
+            const formData = new FormData();
+            formData.append('file', videoBlob, 'input.mp4');
+            formData.append('segments', JSON.stringify(segments));
+            formData.append('style', styleKey);
+
+            const resp = await fetch(serverUrl.replace(/\/$/, '') + '/burn-subtitles', {
+                method: 'POST',
+                body: formData
+            });
+            if (!resp.ok) {
+                const errText = await resp.text().catch(() => '');
+                throw new Error('El servidor respondió con error (' + resp.status + '): ' + errText.slice(0, 200));
+            }
+            return await resp.blob();
+        }
+
         async function burnSubtitles() {
             const lang = document.getElementById('burnLangSelect').value;
             const segments = lastSubtitleResult && lastSubtitleResult[lang];
@@ -1580,9 +1601,29 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 setBurnStatus('AVISO', 'El video tiene ' + segments.length + ' líneas de subtítulo — esto puede tardar bastante. Continuando…', 5);
             }
 
+            const styleKey = selectedSubtitleStyle;
+            let resultBlob = null;
+
+            // -------- Intento automático: SERVIDOR (FFmpeg nativo) --------
+            const serverUrl = document.getElementById('burnServerUrl').value.trim();
+            if (serverUrl) {
+                try {
+                    setBurnStatus('PEGANDO (SERVIDOR)', 'Subiendo el video al servidor…', 15);
+                    const videoBlob = new Blob([uploadedVideoBytes], { type: 'video/mp4' });
+                    resultBlob = await runCloudBurn(videoBlob, segments, styleKey);
+                    setBurnStatus('FINALIZANDO', 'Video recibido del servidor…', 95);
+                } catch (serverErr) {
+                    console.warn('El servidor de pegado falló, usando FFmpeg local automáticamente:', serverErr);
+                    resultBlob = null;
+                    setBurnStatus('SERVIDOR NO DISPONIBLE', 'Usando el procesamiento local en su lugar…', 10);
+                }
+            }
+
             const writtenFiles = ['burn_input.mp4', 'burn_font.ttf'];
             try {
-                setBurnStatus('PREPARANDO', 'Cargando tipografía y video…', 8);
+                if (!resultBlob) {
+                    // -------- Respaldo automático: LOCAL (FFmpeg WASM) --------
+                    setBurnStatus('PREPARANDO', 'Cargando tipografía y video…', 8);
                 const engine = await initFFmpeg();
                 const fontBytes = await getSubtitleFontBytes();
                 await engine.writeFile('burn_font.ttf', fontBytes.slice());
@@ -1661,7 +1702,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 }
 
                 setBurnStatus('PREPARANDO TEXTOS', 'Escribiendo ' + segments.length + ' líneas de subtítulo…', 15);
-                const styleKey = selectedSubtitleStyle;
                 const buildStyle = SUBTITLE_STYLES[styleKey] || SUBTITLE_STYLES.vertice;
                 const filterParts = [];
                 for (let i = 0; i < segments.length; i++) {
@@ -1690,8 +1730,8 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                     '-i', 'burn_input.mp4',
                     '-vf', filterChain,
                     '-c:v', 'libx264',
-                    '-preset', 'veryfast',
-                    '-crf', '23',
+                    '-preset', 'ultrafast',
+                    '-crf', '26',
                     '-c:a', 'copy',
                     '-movflags', '+faststart',
                     'burn_output.mp4'
@@ -1699,8 +1739,11 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
 
                 setBurnStatus('FINALIZANDO', 'Generando el archivo final…', 92);
                 const data = await engine.readFile('burn_output.mp4');
-                const blob = new Blob([data], { type: 'video/mp4' });
-                const url = URL.createObjectURL(blob);
+                resultBlob = new Blob([data], { type: 'video/mp4' });
+                await engine.deleteFile('burn_output.mp4').catch(() => {});
+                } // fin del respaldo local (if (!resultBlob))
+
+                const url = URL.createObjectURL(resultBlob);
                 ffmpegRuntimeBlobURLs.push(url);
 
                 const video = document.getElementById('burnOutputVideo');
@@ -1729,8 +1772,6 @@ select.btn-secondary{border:1px solid var(--line)!important;color:#fff!important
                 setTimeout(() => document.getElementById('burnProgressBar').classList.add('hidden'), 900);
                 showBurnMessage('success', '✓ Video con subtítulos listo — reprodúcelo o descárgalo arriba.');
                 updateExportEmptyHints();
-
-                await engine.deleteFile('burn_output.mp4').catch(() => {});
             } catch (err) {
                 console.error('Error quemando subtítulos:', err);
                 resetFFmpegIfCorrupted(err);
