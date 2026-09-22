@@ -26,12 +26,24 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const FONT_PATH = path.join(__dirname, 'roboto-bold.ttf');
 const MAX_UPLOAD_MB = 500; // mismo límite que ya usa la app en el navegador
+const ALLOWED_ORIGIN = 'https://francisco101299.github.io';
 
-app.use(cors()); // en producción, considera restringir esto a tu dominio de GitHub Pages
+// CORS: restringido a tu dominio de GitHub Pages — así nadie más puede usar
+// este servidor (y tu cuota gratis de Render) desde otro sitio.
+app.use(cors({ origin: ALLOWED_ORIGIN }));
 
+// Validación básica: rechazamos de entrada cualquier archivo que no se
+// declare como video, en vez de dejar que FFmpeg reciba cualquier cosa.
 const upload = multer({
     dest: os.tmpdir(),
-    limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 }
+    limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype && file.mimetype.startsWith('video/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('El archivo enviado no es un video (tipo recibido: ' + file.mimetype + ').'));
+        }
+    }
 });
 
 // ---- Los mismos 5 estilos que ya existen en la app (VÉRTICE, Clásico,
@@ -198,6 +210,17 @@ function cleanup(paths) {
 
 app.get('/', (req, res) => {
     res.json({ status: 'ok', service: 'vertice-burn-server' });
+});
+
+// Manejador de errores: si multer rechaza el archivo (tipo inválido o
+// demasiado grande), devolvemos un JSON claro en vez de la página de
+// error genérica de Express.
+app.use((err, req, res, next) => {
+    if (err) {
+        console.warn('Solicitud rechazada:', err.message);
+        return res.status(400).json({ error: err.message || 'Solicitud inválida.' });
+    }
+    next();
 });
 
 app.listen(PORT, () => {
