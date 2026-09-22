@@ -59,9 +59,9 @@ const SUBTITLE_STYLES = {
         ':box=0'
 };
 
-function execFileAsync(cmd, args) {
+function execFileAsync(cmd, args, options = {}) {
     return new Promise((resolve, reject) => {
-        execFile(cmd, args, { maxBuffer: 1024 * 1024 * 64 }, (err, stdout, stderr) => {
+        execFile(cmd, args, { maxBuffer: 1024 * 1024 * 64, ...options }, (err, stdout, stderr) => {
             if (err) {
                 err.stderr = stderr;
                 reject(err);
